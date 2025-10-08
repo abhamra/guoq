@@ -30,6 +30,7 @@ import qoptimizer.circuit.Node;
 import qoptimizer.circuit.OptCircuit;
 import qoptimizer.circuit.OptCircuitComparator;
 import qoptimizer.circuit.PathSum;
+import qoptimizer.circuit.Match;
 import qoptimizer.config.GateSet;
 import qoptimizer.config.OptObj;
 import qoptimizer.config.Params;
@@ -60,6 +61,9 @@ import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -333,7 +337,260 @@ public class Optimizer {
         return replace;
     }
 
-    public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String replace, boolean applyOnce, Random rand) {
+    // public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String replace, boolean applyOnce, Random rand) {
+    //     List<Node> roots = pattern.roots();
+    //     Node start = roots.get(0);
+    //     Map<Node, Node> patternToCirc = new HashMap<>();
+    //     Map<Edge, Edge> patternToCircEdges = new HashMap<>();
+    //     Map<String, Expr> angleMap = new HashMap<>();
+    //     Set<Node> matched = new HashSet<>();
+    //     Set<Node> replaced = new HashSet<>();
+    //     List<Map<Node, Node>> matches = new ArrayList<>();
+    //
+    //     CircuitDAG copy = null;
+    //     List<Node> nodes = new ArrayList<>(circuit.nodes());
+    //     Collections.shuffle(nodes, rand);
+    //
+    //     for (Node circN : nodes) {
+    //         patternToCirc.clear();
+    //         patternToCircEdges.clear();
+    //         angleMap.clear();
+    //         if (matched.contains(circN) || replaced.contains(circN)) {
+    //             continue;
+    //         }
+    //         if (circN.isGate() && circN.getId().equals(start.getId())) {
+    //             patternToCirc.put(start, circN);
+    //             if (start.getAngles() != null) {
+    //                 if (!matchAngles(circN, start, angleMap)) {
+    //                     continue;
+    //                 }
+    //             }
+    //             List<Node> succsToVisit = new ArrayList<>();
+    //             List<Node> ancsToVisit = new ArrayList<>();
+    //             Set<Node> seen = new HashSet<>();
+    //
+    //             if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
+    //                 continue;
+    //             }
+    //             if (!matchIncoming(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
+    //                 continue;
+    //             }
+    //             seen.add(start);
+    //
+    //             boolean match = true;
+    //             while (!succsToVisit.isEmpty() || !ancsToVisit.isEmpty()) {
+    //                 while (!succsToVisit.isEmpty()) {
+    //                     Node succ = succsToVisit.get(0);
+    //                     succsToVisit.remove(0);
+    //
+    //                     if (seen.contains(succ)) {
+    //                         continue;
+    //                     }
+    //
+    //                     if (matched.contains(patternToCirc.get(succ)) || replaced.contains(patternToCirc.get(succ))) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //
+    //                     if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //                     if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //                     seen.add(succ);
+    //                 }
+    //                 if (!match) {
+    //                     break;
+    //                 }
+    //
+    //                 while (!ancsToVisit.isEmpty()) {
+    //                     Node anc = ancsToVisit.get(0);
+    //                     ancsToVisit.remove(0);
+    //
+    //                     if (seen.contains(anc)) {
+    //                         continue;
+    //                     }
+    //
+    //                     if (matched.contains(patternToCirc.get(anc)) || replaced.contains(patternToCirc.get(anc))) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //
+    //                     if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //                     if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
+    //                         match = false;
+    //                         break;
+    //                     }
+    //                     seen.add(anc);
+    //                 }
+    //                 if (!match) {
+    //                     break;
+    //                 }
+    //             }
+    //             if (!match) {
+    //                 continue;
+    //             }
+    //             if (patternToCirc.size() == pattern.totalGateCount()) {
+    //                 matched.addAll(patternToCirc.values());
+    //                 matches.add(new HashMap<>(patternToCirc));
+    //
+    //                 Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
+    //                 if (new HashSet<>(patternToCircuitQubit.values()).size() != patternToCircuitQubit.values().size()) {
+    //                     continue;
+    //                 }
+    //
+    //                 if (copy == null) {
+    //                     copy = new CircuitDAG(circuit);
+    //                 }
+    //
+    //                 String[] searchList = new String[patternToCircuitQubit.size() * 2];
+    //                 String[] replaceList = new String[patternToCircuitQubit.size() * 2];
+    //                 int i = 0;
+    //                 for (String key : patternToCircuitQubit.keySet()) {
+    //                     searchList[i] = key + ",";
+    //                     replaceList[i] = patternToCircuitQubit.get(key) + ",";
+    //                     i++;
+    //                     searchList[i] = key + ";";
+    //                     replaceList[i] = patternToCircuitQubit.get(key) + ";";
+    //                     i++;
+    //                 }
+    //                 String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
+    //                 replaceAfterSubst = replaceAngles(replaceAfterSubst, angleMap);
+    //
+    //                 CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
+    //                 replaced.addAll(replaceDag.nodes());
+    //
+    //                 replace(copy.getDag(), pattern, replaceDag, patternToCirc, patternToCircuitQubit);
+    //                 if (applyOnce) {
+    //                     return copy;
+    //                 }
+    //                 circuit = copy;
+    //             }
+    //         }
+    //     }
+    //     return copy;
+    // }
+
+
+    // Helper function that, given a circuit, pattern, and start node within the circuit,
+    // returns a match if it exists, or null otherwise.
+    // Essentially does everything done within the for circN in nodes construct
+    private Match matchAtNode(CircuitDAG circuit, CircuitDAG pattern, Node startNode) {
+        Node patternStart = pattern.roots().get(0);
+        if (!startNode.isGate() || !startNode.getId().equals(patternStart.getId())) return null; // inverted check to original find
+
+        Map<Node, Node> patternToCirc = new HashMap<>();
+        Map<Edge, Edge> patternToCircEdges = new HashMap<>();
+        Map<String, Expr> angleMap = new HashMap<>();
+        Set<Node> seen = new HashSet<>();
+        List<Node> succsToVisit = new ArrayList<>();
+        List<Node> ancsToVisit = new ArrayList<>();
+
+        patternToCirc.put(patternStart, startNode);
+        if (patternStart.getAngles() != null && !matchAngles(startNode, patternStart, angleMap)) {
+            return null;
+        }
+
+        if (!matchOutgoing(circuit.getDag(), pattern.getDag(), startNode, patternStart, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) return null;
+        if (!matchIncoming(circuit.getDag(), pattern.getDag(), startNode, patternStart, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) return null;
+
+        seen.add(patternStart);
+
+        boolean match = true;
+        while (!succsToVisit.isEmpty() || !ancsToVisit.isEmpty()) {
+            while (!succsToVisit.isEmpty()) {
+                Node succ = succsToVisit.remove(0);
+                if (seen.contains(succ)) continue;
+                Node circNode = patternToCirc.get(succ);
+
+
+                // NOTE: As of now, we don't need checks against the original "matched" and "replaced" sets,
+                // since the semi-disjoint nature of the windows and the claimedIntervals checks mean we're fine
+                if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circNode, succ, patternToCirc, patternToCircEdges, angleMap, succsToVisit)
+                        || !matchIncoming(circuit.getDag(), pattern.getDag(), circNode, succ, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
+                    match = false; break;
+                }
+                seen.add(succ);
+            }
+            if (!match) break;
+
+            while (!ancsToVisit.isEmpty()) {
+                Node anc = ancsToVisit.remove(0);
+                if (seen.contains(anc)) continue;
+                Node circNode = patternToCirc.get(anc);
+                // NOTE: Same situation as with the successors w.r.t matched, replaced sets
+                if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circNode, anc, patternToCirc, patternToCircEdges, angleMap, succsToVisit)
+                        || !matchIncoming(circuit.getDag(), pattern.getDag(), circNode, anc, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
+                    match = false; break;
+                }
+                seen.add(anc);
+            }
+        }
+
+        if (!match || patternToCirc.size() != pattern.totalGateCount()) return null;
+
+        // FIXME: This seems wrong, fix later/soon
+        int startDepth = patternToCirc.values().stream().mapToInt(Node::depth).min().orElse(startNode.depth());
+        int endDepth = patternToCirc.values().stream().mapToInt(Node::depth).max().orElse(startNode.depth()) + 1;
+
+        return new Match(startNode, new HashSet<>(patternToCirc.values()), startDepth, endDepth, angleMap);
+    }
+
+
+    private void applyMatch(CircuitDAG circuit, CircuitDAG pattern, String lhs, Match match) {
+        // Map pattern qubits to circuit qubits
+        Map<String, String> patternToCircuitQubit = patternToCircuitQubit(match.matchedNodes);
+
+        // Skip if qubit mapping is invalid
+        if (match.matchedNodes.size() != patternToCircuitQubit.values().size()) return;
+
+        // Build replacement QASM
+        String replace = lhs;
+        String[] searchList = new String[patternToCircuitQubit.size() * 2];
+        String[] replaceList = new String[patternToCircuitQubit.size() * 2];
+        int i = 0;
+        for (String key : patternToCircuitQubit.keySet()) {
+            searchList[i] = key + ",";
+            replaceList[i] = patternToCircuitQubit.get(key) + ",";
+            i++;
+            searchList[i] = key + ";";
+            replaceList[i] = patternToCircuitQubit.get(key) + ";";
+            i++;
+        }
+        String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
+        replaceAfterSubst = replaceAngles(replaceAfterSubst, match.angleMap);
+
+        CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
+        replace(circuit.getDag(), pattern, replaceDag, null, patternToCircuitQubit);
+    }
+
+
+    public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String lhs, boolean applyOnce, Random rand) {
+        CircuitDAG copy = null;
+
+        List<Node> nodes = new ArrayList<>(circuit.nodes());
+        Collections.shuffle(nodes, rand);
+
+        for (Node n : nodes) {
+            Match match = matchAtNode(circuit, pattern, n);
+            if (match != null) {
+                if (copy == null) copy = new CircuitDAG(circuit); // lazy copy
+                applyMatch(copy, pattern, lhs, match);
+                if (applyOnce) return copy;
+            }
+        }
+
+        return copy;
+    }
+
+
+    public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer> claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
         List<Node> roots = pattern.roots();
         Node start = roots.get(0);
         Map<Node, Node> patternToCirc = new HashMap<>();
@@ -344,10 +601,11 @@ public class Optimizer {
         List<Map<Node, Node>> matches = new ArrayList<>();
 
         CircuitDAG copy = null;
-        List<Node> nodes = new ArrayList<>(circuit.nodes());
-        Collections.shuffle(nodes, rand);
+        // List<Node> nodes = new ArrayList<>(circuit.nodes());
+        List<Node> nodesInWindow = circuit.nodes().stream().filter(n -> n.depth() >= startDepth && n.depth() <= endDepth).toList();
+        Collections.shuffle(nodesInWindow, rand);
 
-        for (Node circN : nodes) {
+        for (Node circN : nodesInWindow) {
             patternToCirc.clear();
             patternToCircEdges.clear();
             angleMap.clear();
@@ -593,6 +851,62 @@ public class Optimizer {
             return circuit;
         }
         return result;
+    }
+
+    // Returns the updated CircuitDAG given some input pattern to apply, does rule matching and application in parallel
+    // We use a form of depth parallelism by dividing the circuit into subcircuits, and finding matches in each subcircuits
+    // via pointer analysis
+    // NOTE: applyOnce defaults to true for now, at call-time
+
+    // Overall plan of attack:
+    // 1. (Correctly) create threads for each subcircuit
+    // 2. Call a modified find on each subcircuit that takes in a circuit window and returns
+    //    an interval (?) or some information specifying the starting node for where the pattern
+    //    should be applied/replaced
+    // 3. Collect all of those instances and sequentially apply them?
+    // 
+    // Alternate idea:
+    // 1. (Correctly) create threads for each subcircuit
+    // 2. Call find on each subcircuit, in parallel apply the change to the same circuit object
+    //    we can check this via the claimedIntervals structure
+    // 3. Don't need to collect stuff later
+    public CircuitDAG applyRuleParallel(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+        int patternDepth = pattern.getDepth();
+        int circuitDepth = circuit.getDepth();
+        int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+        int cores = Runtime.getRuntime().availableProcessors();
+        
+        // attempt to multithread :D
+        // NOTE: claimedIntervals is allowed to use this structure because we ASSUME applyOnce = true
+        // For future, if/when we allow the ability to apply multiple times in a window, we can use
+        // claimedIntervals and only store the earliest match for a given window, because that is what will
+        // cause a conflict with the patternDepth overlap
+        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
+        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock(); // for claimedIntervals
+        ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
+        List<Future<CircuitDAG>> futures = new ArrayList<>();
+        // Collect results: each thread returns its transformed sub-DAG or null
+        for (int i = 0; i < numWindows; i++) {
+            final int windowIndex = i;
+            final int startDepth = i * patternDepth;
+            final int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
+            futures.add(threadPool.submit(() ->
+                findParallel(circuit, pattern, startDepth, endDepth, applyOnce, rand, claimedIntervals, rwl, windowIndex)
+            ));
+        }
+
+        // wait for all threads to finish
+        for (Future<?> f : futures) {
+            try {
+                f.get();
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+            }
+        }
+
+        threadPool.shutdown();
+        return circuit; // updated in-place via findParallel
+
     }
 
     public CircuitDAG applySymbRule(CircuitDAG circuit,
@@ -2062,6 +2376,189 @@ public class Optimizer {
                         String replaceBeforeSymb = StringUtils.stripStart(replace.substring(0, replaceSymbIndex).trim(), ";");
                         String replaceAfterSymb = StringUtils.stripStart(replace.substring(replace.indexOf(";", replaceSymbIndex)).trim(), ";").trim();
 
+                        CircuitDAG cPrime = applySymbRule(c.getCircuit(), findBeforeSymb, findAfterSymb, replaceBeforeSymb, replaceAfterSymb, parseConstraints(splitRule[2]), Params.MAX_SYMB_QUBITS, Params.MAX_SYMB_SIZE, Params.APPLY_ONCE, rand);
+                        var rulesApplied = new ArrayList<>(c.getRulesApplied());
+                        candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
+                        if (cPrime != c.getCircuit()) {
+                            rulesApplied.add(new Pair(ruleSymb, candidate.getCircuit().totalGateCount()));
+
+                            if (ruleCount.containsKey(ruleSymb)) {
+                                ruleCount.put(ruleSymb, ruleCount.get(ruleSymb) + 1);
+                            } else {
+                                ruleCount.put(ruleSymb, 1);
+                            }
+                        }
+                    } else {
+                        if (Params.RESYNTH_ALG == Resynth.NONE) {
+                            q.add(candidate);
+                            continue;
+                        }
+                        if (resynthThread == null) {
+                            if (c.countResynthApplications() < Params.MAX_RESYNTH_ALLOWED || Params.MAX_RESYNTH_ALLOWED == -1) {
+                                CircuitDAG input = c.getCircuit();
+                                resynthThread = ThreadUtils.submit(() -> applyResynth(Params.RESYNTH_ALG, input, rand, Params.EPSILON / Params.MAX_RESYNTH_ALLOWED, Params.RESYNTH_ARGS));
+                                q.add(candidate);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                int candidateSize = candidate.getCircuit().cost(Params.OPTIMIZATION_OBJECTIVE);
+                int currentSize = c.getCircuit().cost(Params.OPTIMIZATION_OBJECTIVE);
+                if (candidateSize <= currentSize) {
+                    q.add(candidate);
+                } else {
+                    double acceptP = Math.min(1, Math.exp(-Params.TEMPERATURE * ((double) candidateSize / currentSize)));
+                    if (rand.nextDouble() <= acceptP) {
+                        q.add(candidate);
+                    } else {
+                        q.add(c);
+                    }
+                }
+            }
+        }
+
+        return bestCircuit;
+    }
+
+    public OptCircuit optimizeBeamMCMCParallel(OptCircuit circuit,
+                                       HashMap<String, Integer> ruleCount,
+                                       boolean onlySymb,
+                                       String filename,
+                                       String ruleFileName,
+                                       String symbRuleFileName,
+                                       Path output) throws IOException, ExecutionException, InterruptedException {
+        List<Pair<CircuitDAG, String>> rules = null;
+        if (!onlySymb) {
+            rules = getRules(ruleFileName, Params.REMOVE_SIZE_PRESERVING_RULES, Params.MAX_RULE_QUBITS, Params.PRESERVE_MAPPING, Params.USE_SIZE_PRESERVE_RULE_REFLECTION, Params.USE_SIZE_INCREASING_RULES, Params.OPTIMIZATION_OBJECTIVE);
+        }
+        List<String> rulesSymb = getSymbRules(symbRuleFileName, Params.USE_SIZE_PRESERVING_SYMB_RULES, Params.MAX_RULE_QUBITS, Params.PRESERVE_MAPPING, Params.USE_SIZE_PRESERVE_RULE_REFLECTION);
+        Params.setResynthWeight(rules.size() + rulesSymb.size());
+
+        if (Params.VERBOSITY >= 2) {
+            System.out.println("Total rules: %s, normal: %s, symb: %s".formatted(rules.size() + rulesSymb.size(), rules.size(), rulesSymb.size()));
+        }
+
+        OptCircuit bestCircuit = circuit;
+        Set<Integer> seen = new HashSet<>();
+        seen.add(circuit.hashCode());
+        PriorityQueue<OptCircuit> q = new PriorityQueue<>(new OptCircuitComparator(Params.OPTIMIZATION_OBJECTIVE));
+        q.add(circuit);
+        long timeStart = System.currentTimeMillis();
+
+        Future<Pair<CircuitDAG, String>> resynthThread = null;
+
+        int iters = 0;
+        Random rand = new Random(new Random(Params.SEED).nextInt());
+        int numRulesApplied = ruleCount.size();
+
+        while (!q.isEmpty()) {
+            iters++;
+
+            // update best circuit if necessary
+            OptCircuit c = q.peek();
+            if (bestSol(c.getCircuit(), bestCircuit.getCircuit(), Params.OPTIMIZATION_OBJECTIVE)) {
+                bestCircuit = c;
+                bestCircuit.setTimeToBest(((System.currentTimeMillis() - timeStart) / 1000));
+
+                String qasm = CircuitParser.dagToQasm(bestCircuit.getCircuit());
+
+                logIntermediateInfo(bestCircuit, ruleCount, (System.currentTimeMillis() - timeStart) / 1000.0, Params.VERBOSITY >= 3);
+                writeCircuitToFile(bestCircuit.getCircuit(), output + String.format("/latest_sol_%s_%s", Params.JOB_INFO, filename));
+            }
+
+            c = dequeueCircuit(q, Params.TEMPERATURE, Params.OPTIMIZATION_OBJECTIVE, rand);
+
+            // prune queue if too large
+            if (q.size() > (Params.QUEUE_SIZE)) {
+                PriorityQueue<OptCircuit> pruned = new PriorityQueue<>(new OptCircuitComparator(Params.OPTIMIZATION_OBJECTIVE));
+                while (pruned.size() != Params.QUEUE_SIZE) {
+                    pruned.add(q.poll());
+                }
+                q = pruned;
+            }
+
+            // Process rules (potentially prune during search)
+            int min = 0;
+            int max = rules.size() + rulesSymb.size() + Params.RESYNTH_WEIGHT;
+
+            List<Integer> rulesToUse = new ArrayList<>();
+
+            if (Params.PRUNE_TEMPERATURE == 0) {
+                if (Params.NUM_TRANSFORMATIONS_SAMPLE != -1) {
+                    while (rulesToUse.size() != Params.NUM_TRANSFORMATIONS_SAMPLE) {
+                        int randRule = rand.nextInt(max - min) + min;
+                        if (!rulesToUse.contains(randRule)) {
+                            rulesToUse.add(randRule);
+                        }
+                    }
+                } else {
+                    IntStream.range(0, rules.size() + rulesSymb.size() + 1).forEach(x -> rulesToUse.add(x));
+                }
+            } else {
+                List<Integer> allRules = new ArrayList<>();
+                IntStream.range(0, rules.size() + rulesSymb.size() + 1).forEach(x -> allRules.add(x));
+
+                sampleRulesInt(allRules, rulesToUse, Params.NUM_TRANSFORMATIONS_SAMPLE, Params.PRUNE_TEMPERATURE, bestCircuit, ruleCount, rand, rules, rulesSymb);
+                Params.PRUNE_TEMPERATURE *= 1 - Params.COOLING_RATE;
+            }
+
+            // TODO: We can potentially parallelize this! Given N cores (?),
+            // select the N first rules we want to test, do our parallel application for each of them,
+            // and then do some sort of "scoring" pass to evaluate relative cost improvement for each
+            // of the N rules. However, there can also be thread contention in this case (because of
+            // nested parallelism within find and applyRule)
+            for (Integer ruleToUse : rulesToUse) {
+                OptCircuit candidate = c;
+                if (resynthThread != null && resynthThread.isDone()) {
+                    Pair<CircuitDAG, String> resynthResult = resynthThread.get();
+                    var rulesApplied = new ArrayList<>(c.getRulesApplied());
+                    candidate = new OptCircuit(resynthResult.getFirst(), rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
+                    rulesApplied.add(new Pair("resynth", candidate.getCircuit().totalGateCount()));
+                    rulesApplied.add(new Pair(resynthResult.getSecond(), candidate.getCircuit().totalGateCount()));
+
+                    if (ruleCount.containsKey("resynth")) {
+                        ruleCount.put("resynth", ruleCount.get("resynth") + Params.RESYNTH_WEIGHT);
+                    } else {
+                        ruleCount.put("resynth", Params.RESYNTH_WEIGHT);
+                    }
+
+                    resynthThread = null;
+                } else {
+                    if (ruleToUse < rules.size()) {
+                        Pair<CircuitDAG, String> rule = rules.get(ruleToUse);
+                        String[] splitRule = rule.getSecond().split(" \\| ");
+                        var rulesApplied = new ArrayList<>(c.getRulesApplied());
+                        // TODO: Make the apply rule parallel!
+                        // FIXME: We currently default to applyOnce = true, for simplicity
+                        CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
+                        candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
+                        if (cPrime != c.getCircuit()) {
+                            rulesApplied.add(new Pair(rule.getSecond(), candidate.getCircuit().totalGateCount()));
+
+                            if (ruleCount.containsKey(rule.getSecond())) {
+                                ruleCount.put(rule.getSecond(), ruleCount.get(rule.getSecond()) + 1);
+                            } else {
+                                ruleCount.put(rule.getSecond(), 1);
+                            }
+                        }
+                    } else if (ruleToUse < rules.size() + rulesSymb.size()) {
+                        String ruleSymb = rulesSymb.get(ruleToUse - rules.size());
+                        String[] splitRule = ruleSymb.split(" \\| ");
+
+                        String find = splitRule[1];
+                        String replace = splitRule[0];
+
+                        int findSymbIndex = find.indexOf("symb");
+                        String findBeforeSymb = StringUtils.stripStart(find.substring(0, findSymbIndex).trim(), ";");
+                        String findAfterSymb = StringUtils.stripStart(find.substring(find.indexOf(";", findSymbIndex)).trim(), ";").trim();
+                        int replaceSymbIndex = replace.indexOf("symb");
+                        String replaceBeforeSymb = StringUtils.stripStart(replace.substring(0, replaceSymbIndex).trim(), ";");
+                        String replaceAfterSymb = StringUtils.stripStart(replace.substring(replace.indexOf(";", replaceSymbIndex)).trim(), ";").trim();
+
+                        // FIXME: Apply symb rule also parallelize this!
+                        // We currently default to applyOnce = true, for simplicity
                         CircuitDAG cPrime = applySymbRule(c.getCircuit(), findBeforeSymb, findAfterSymb, replaceBeforeSymb, replaceAfterSymb, parseConstraints(splitRule[2]), Params.MAX_SYMB_QUBITS, Params.MAX_SYMB_SIZE, Params.APPLY_ONCE, rand);
                         var rulesApplied = new ArrayList<>(c.getRulesApplied());
                         candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);

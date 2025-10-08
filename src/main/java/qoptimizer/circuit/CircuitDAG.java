@@ -65,6 +65,46 @@ public class CircuitDAG {
         return qasm.toString();
     }
 
+    public int getDepth() {
+        Map<Node, Integer> depthMap = new HashMap<>();
+        TopologicalOrderIterator<Node, Edge> iter = new TopologicalOrderIterator<>(dag);
+
+        while (iter.hasNext()) {
+            Node node = iter.next();
+
+            // Ignore source qubits
+            if (node.isSourceQubit()) {
+                depthMap.put(node, 0);
+                continue;
+            }
+
+            int maxPredDepth = 0;
+            for (Node pred : Graphs.predecessorListOf(dag, node)) {
+                int predDepth = depthMap.getOrDefault(pred, 0);
+                if (pred.isSourceQubit()) {
+                    predDepth = 0; // don't count sources
+                } else if (pred.isSinkQubit()) {
+                    continue; // skip sinks in path
+                }
+                maxPredDepth = Math.max(maxPredDepth, predDepth);
+            }
+
+            depthMap.put(node, maxPredDepth + 1); // add this gate
+        }
+
+        // max depth over all sink's predecessors
+        int maxDepth = 0;
+        for (Node n : dag.vertexSet()) {
+            if (n.isSinkQubit()) {
+                for (Node pred : Graphs.predecessorListOf(dag, n)) {
+                    maxDepth = Math.max(maxDepth, depthMap.getOrDefault(pred, 0));
+                }
+            }
+        }
+
+        return maxDepth;
+    }
+
     public boolean contains(Node gate) {
         return gatesToAddStack.contains(gate);
     }
