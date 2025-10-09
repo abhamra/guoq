@@ -50,6 +50,7 @@ public class CircuitDAG {
         this.qasmHeader = circuit.getQasmHeader();
         this.qubits = new HashSet<>(circuit.getQubits());
         this.qubitRenameMap = HashBiMap.create(circuit.getQubitRenameMap());
+        this.assignDepthToNodes();
     }
 
     public String toQASM() {
@@ -65,41 +66,60 @@ public class CircuitDAG {
         return qasm.toString();
     }
 
-    public int getDepth() {
+    // Assigns a depth value to all nodes, in topo-sort time O(V + E)
+    public void assignDepthToNodes() {
         Map<Node, Integer> depthMap = new HashMap<>();
         TopologicalOrderIterator<Node, Edge> iter = new TopologicalOrderIterator<>(dag);
 
         while (iter.hasNext()) {
             Node node = iter.next();
 
-            // Ignore source qubits
+            // Source qubits are depth 0
             if (node.isSourceQubit()) {
                 depthMap.put(node, 0);
+                node.setDepth(0);
                 continue;
             }
 
             int maxPredDepth = 0;
             for (Node pred : Graphs.predecessorListOf(dag, node)) {
                 int predDepth = depthMap.getOrDefault(pred, 0);
+
                 if (pred.isSourceQubit()) {
                     predDepth = 0; // don't count sources
                 } else if (pred.isSinkQubit()) {
-                    continue; // skip sinks in path
+                    continue; // skip sinks
                 }
+
                 maxPredDepth = Math.max(maxPredDepth, predDepth);
             }
 
-            depthMap.put(node, maxPredDepth + 1); // add this gate
+            int nodeDepth = maxPredDepth + 1;
+            depthMap.put(node, nodeDepth);
+            node.setDepth(nodeDepth);
         }
 
-        // max depth over all sink's predecessors
-        int maxDepth = 0;
+        // set sink qubits' depth = max of their preds
         for (Node n : dag.vertexSet()) {
             if (n.isSinkQubit()) {
+                int maxPredDepth = 0;
                 for (Node pred : Graphs.predecessorListOf(dag, n)) {
-                    maxDepth = Math.max(maxDepth, depthMap.getOrDefault(pred, 0));
+                    maxPredDepth = Math.max(maxPredDepth, depthMap.getOrDefault(pred, 0));
                 }
+                n.setDepth(maxPredDepth);
             }
+        }
+    }
+
+    // This function gets the overall depth of the circuit by returning the depth associated with
+    // the last non-sink node
+    // SAFETY: We assume that assignDepthToNodes has been called after any changes to the CircuitDAG
+    public int getDepth() {
+        int maxDepth = 0;
+
+        for (Node node : dag.vertexSet()) {
+            System.out.println("node depth: " + node.getDepth());
+            maxDepth = Math.max(maxDepth, node.getDepth());
         }
 
         return maxDepth;

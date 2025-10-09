@@ -536,19 +536,19 @@ public class Optimizer {
         if (!match || patternToCirc.size() != pattern.totalGateCount()) return null;
 
         // FIXME: This seems wrong, fix later/soon
-        int startDepth = patternToCirc.values().stream().mapToInt(Node::depth).min().orElse(startNode.depth());
-        int endDepth = patternToCirc.values().stream().mapToInt(Node::depth).max().orElse(startNode.depth()) + 1;
+        int startDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).min().orElse(startNode.getDepth());
+        int endDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).max().orElse(startNode.getDepth()) + 1;
 
-        return new Match(startNode, new HashSet<>(patternToCirc.values()), startDepth, endDepth, angleMap);
+        return new Match(startNode, patternToCirc, startDepth, endDepth, angleMap);
     }
 
-
+    // Actually changes the CircuitDAG by applying the match from `matchAtNode`
     private void applyMatch(CircuitDAG circuit, CircuitDAG pattern, String lhs, Match match) {
         // Map pattern qubits to circuit qubits
-        Map<String, String> patternToCircuitQubit = patternToCircuitQubit(match.matchedNodes);
+        Map<String, String> patternToCircuitQubit = patternToCircuitQubit(match.patternToCircMap);
 
         // Skip if qubit mapping is invalid
-        if (match.matchedNodes.size() != patternToCircuitQubit.values().size()) return;
+        if (match.patternToCircMap.size() != patternToCircuitQubit.values().size()) return;
 
         // Build replacement QASM
         String replace = lhs;
@@ -590,7 +590,7 @@ public class Optimizer {
     }
 
 
-    public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer> claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
+    public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
         List<Node> roots = pattern.roots();
         Node start = roots.get(0);
         Map<Node, Node> patternToCirc = new HashMap<>();
@@ -602,7 +602,7 @@ public class Optimizer {
 
         CircuitDAG copy = null;
         // List<Node> nodes = new ArrayList<>(circuit.nodes());
-        List<Node> nodesInWindow = circuit.nodes().stream().filter(n -> n.depth() >= startDepth && n.depth() <= endDepth).toList();
+        List<Node> nodesInWindow = circuit.nodes().stream().filter(n -> n.getDepth() >= startDepth && n.getDepth() <= endDepth).toList();
         Collections.shuffle(nodesInWindow, rand);
 
         for (Node circN : nodesInWindow) {
@@ -871,12 +871,16 @@ public class Optimizer {
     //    we can check this via the claimedIntervals structure
     // 3. Don't need to collect stuff later
     public CircuitDAG applyRuleParallel(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+        // Call this just in case we forgot, for each rule
+        circuit.assignDepthToNodes();
+        pattern.assignDepthToNodes();
         int patternDepth = pattern.getDepth();
         int circuitDepth = circuit.getDepth();
         int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
         int cores = Runtime.getRuntime().availableProcessors();
         
         // attempt to multithread :D
+
         // NOTE: claimedIntervals is allowed to use this structure because we ASSUME applyOnce = true
         // For future, if/when we allow the ability to apply multiple times in a window, we can use
         // claimedIntervals and only store the earliest match for a given window, because that is what will
@@ -891,7 +895,7 @@ public class Optimizer {
             final int startDepth = i * patternDepth;
             final int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
             futures.add(threadPool.submit(() ->
-                findParallel(circuit, pattern, startDepth, endDepth, applyOnce, rand, claimedIntervals, rwl, windowIndex)
+                findParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
             ));
         }
 
@@ -2422,6 +2426,8 @@ public class Optimizer {
         return bestCircuit;
     }
 
+    // TODO: Implement this with applyRuleParallel, findParallel, etc!
+    // (And the same functions for symb rules!)
     public OptCircuit optimizeBeamMCMCParallel(OptCircuit circuit,
                                        HashMap<String, Integer> ruleCount,
                                        boolean onlySymb,
