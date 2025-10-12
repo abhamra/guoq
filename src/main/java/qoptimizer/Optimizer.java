@@ -337,165 +337,28 @@ public class Optimizer {
         return replace;
     }
 
-    // public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String replace, boolean applyOnce, Random rand) {
-    //     List<Node> roots = pattern.roots();
-    //     Node start = roots.get(0);
-    //     Map<Node, Node> patternToCirc = new HashMap<>();
-    //     Map<Edge, Edge> patternToCircEdges = new HashMap<>();
-    //     Map<String, Expr> angleMap = new HashMap<>();
-    //     Set<Node> matched = new HashSet<>();
-    //     Set<Node> replaced = new HashSet<>();
-    //     List<Map<Node, Node>> matches = new ArrayList<>();
-    //
-    //     CircuitDAG copy = null;
-    //     List<Node> nodes = new ArrayList<>(circuit.nodes());
-    //     Collections.shuffle(nodes, rand);
-    //
-    //     for (Node circN : nodes) {
-    //         patternToCirc.clear();
-    //         patternToCircEdges.clear();
-    //         angleMap.clear();
-    //         if (matched.contains(circN) || replaced.contains(circN)) {
-    //             continue;
-    //         }
-    //         if (circN.isGate() && circN.getId().equals(start.getId())) {
-    //             patternToCirc.put(start, circN);
-    //             if (start.getAngles() != null) {
-    //                 if (!matchAngles(circN, start, angleMap)) {
-    //                     continue;
-    //                 }
-    //             }
-    //             List<Node> succsToVisit = new ArrayList<>();
-    //             List<Node> ancsToVisit = new ArrayList<>();
-    //             Set<Node> seen = new HashSet<>();
-    //
-    //             if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-    //                 continue;
-    //             }
-    //             if (!matchIncoming(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-    //                 continue;
-    //             }
-    //             seen.add(start);
-    //
-    //             boolean match = true;
-    //             while (!succsToVisit.isEmpty() || !ancsToVisit.isEmpty()) {
-    //                 while (!succsToVisit.isEmpty()) {
-    //                     Node succ = succsToVisit.get(0);
-    //                     succsToVisit.remove(0);
-    //
-    //                     if (seen.contains(succ)) {
-    //                         continue;
-    //                     }
-    //
-    //                     if (matched.contains(patternToCirc.get(succ)) || replaced.contains(patternToCirc.get(succ))) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //
-    //                     if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //                     if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //                     seen.add(succ);
-    //                 }
-    //                 if (!match) {
-    //                     break;
-    //                 }
-    //
-    //                 while (!ancsToVisit.isEmpty()) {
-    //                     Node anc = ancsToVisit.get(0);
-    //                     ancsToVisit.remove(0);
-    //
-    //                     if (seen.contains(anc)) {
-    //                         continue;
-    //                     }
-    //
-    //                     if (matched.contains(patternToCirc.get(anc)) || replaced.contains(patternToCirc.get(anc))) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //
-    //                     if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //                     if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-    //                         match = false;
-    //                         break;
-    //                     }
-    //                     seen.add(anc);
-    //                 }
-    //                 if (!match) {
-    //                     break;
-    //                 }
-    //             }
-    //             if (!match) {
-    //                 continue;
-    //             }
-    //             if (patternToCirc.size() == pattern.totalGateCount()) {
-    //                 matched.addAll(patternToCirc.values());
-    //                 matches.add(new HashMap<>(patternToCirc));
-    //
-    //                 Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
-    //                 if (new HashSet<>(patternToCircuitQubit.values()).size() != patternToCircuitQubit.values().size()) {
-    //                     continue;
-    //                 }
-    //
-    //                 if (copy == null) {
-    //                     copy = new CircuitDAG(circuit);
-    //                 }
-    //
-    //                 String[] searchList = new String[patternToCircuitQubit.size() * 2];
-    //                 String[] replaceList = new String[patternToCircuitQubit.size() * 2];
-    //                 int i = 0;
-    //                 for (String key : patternToCircuitQubit.keySet()) {
-    //                     searchList[i] = key + ",";
-    //                     replaceList[i] = patternToCircuitQubit.get(key) + ",";
-    //                     i++;
-    //                     searchList[i] = key + ";";
-    //                     replaceList[i] = patternToCircuitQubit.get(key) + ";";
-    //                     i++;
-    //                 }
-    //                 String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
-    //                 replaceAfterSubst = replaceAngles(replaceAfterSubst, angleMap);
-    //
-    //                 CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
-    //                 replaced.addAll(replaceDag.nodes());
-    //
-    //                 replace(copy.getDag(), pattern, replaceDag, patternToCirc, patternToCircuitQubit);
-    //                 if (applyOnce) {
-    //                     return copy;
-    //                 }
-    //                 circuit = copy;
-    //             }
-    //         }
-    //     }
-    //     return copy;
-    // }
-
-
     // Helper function that, given a circuit, pattern, and start node within the circuit,
     // returns a match if it exists, or null otherwise.
     // Essentially does everything done within the for circN in nodes construct
-    private Match matchAtNode(CircuitDAG circuit, CircuitDAG pattern, Node startNode) {
+    private Match matchAtNode(CircuitDAG circuit, CircuitDAG pattern, Node startNode, Map<Node, Node> patternToCirc, Map<Edge, Edge> patternToCircEdges, Map<String, Expr> angleMap, Set<Node> matched, Set<Node> replaced, List<Map<Node, Node>> matches) {
+        patternToCirc.clear();
+        patternToCircEdges.clear();
+        angleMap.clear();
+        if (matched.contains(startNode) || replaced.contains(startNode)) {
+            return null;
+        }
+
         Node patternStart = pattern.roots().get(0);
         if (!startNode.isGate() || !startNode.getId().equals(patternStart.getId())) return null; // inverted check to original find
-
-        Map<Node, Node> patternToCirc = new HashMap<>();
-        Map<Edge, Edge> patternToCircEdges = new HashMap<>();
-        Map<String, Expr> angleMap = new HashMap<>();
-        Set<Node> seen = new HashSet<>();
-        List<Node> succsToVisit = new ArrayList<>();
-        List<Node> ancsToVisit = new ArrayList<>();
 
         patternToCirc.put(patternStart, startNode);
         if (patternStart.getAngles() != null && !matchAngles(startNode, patternStart, angleMap)) {
             return null;
         }
+
+        List<Node> succsToVisit = new ArrayList<>();
+        List<Node> ancsToVisit = new ArrayList<>();
+        Set<Node> seen = new HashSet<>();
 
         if (!matchOutgoing(circuit.getDag(), pattern.getDag(), startNode, patternStart, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) return null;
         if (!matchIncoming(circuit.getDag(), pattern.getDag(), startNode, patternStart, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) return null;
@@ -507,14 +370,17 @@ public class Optimizer {
             while (!succsToVisit.isEmpty()) {
                 Node succ = succsToVisit.remove(0);
                 if (seen.contains(succ)) continue;
+
+                if (matched.contains(patternToCirc.get(succ)) || replaced.contains(patternToCirc.get(succ))) {
+                    match = false;
+                    break;
+                }
+
                 Node circNode = patternToCirc.get(succ);
-
-
-                // NOTE: As of now, we don't need checks against the original "matched" and "replaced" sets,
-                // since the semi-disjoint nature of the windows and the claimedIntervals checks mean we're fine
                 if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circNode, succ, patternToCirc, patternToCircEdges, angleMap, succsToVisit)
                         || !matchIncoming(circuit.getDag(), pattern.getDag(), circNode, succ, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-                    match = false; break;
+                    match = false;
+                    break;
                 }
                 seen.add(succ);
             }
@@ -524,18 +390,24 @@ public class Optimizer {
                 Node anc = ancsToVisit.remove(0);
                 if (seen.contains(anc)) continue;
                 Node circNode = patternToCirc.get(anc);
-                // NOTE: Same situation as with the successors w.r.t matched, replaced sets
+
+                if (matched.contains(circNode) || replaced.contains(circNode)) {
+                    match = false;
+                    break;
+                }
                 if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circNode, anc, patternToCirc, patternToCircEdges, angleMap, succsToVisit)
                         || !matchIncoming(circuit.getDag(), pattern.getDag(), circNode, anc, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-                    match = false; break;
+                    match = false;
+                    break;
                 }
                 seen.add(anc);
             }
         }
 
         if (!match || patternToCirc.size() != pattern.totalGateCount()) return null;
+        matched.addAll(patternToCirc.values());
+        matches.add(new HashMap<>(patternToCirc));
 
-        // FIXME: This seems wrong, fix later/soon
         int startDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).min().orElse(startNode.getDepth());
         int endDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).max().orElse(startNode.getDepth()) + 1;
 
@@ -543,15 +415,27 @@ public class Optimizer {
     }
 
     // Actually changes the CircuitDAG by applying the match from `matchAtNode`
-    private void applyMatch(CircuitDAG circuit, CircuitDAG pattern, String lhs, Match match) {
-        // Map pattern qubits to circuit qubits
-        Map<String, String> patternToCircuitQubit = patternToCircuitQubit(match.patternToCircMap);
+    private CircuitDAG applyMatch(
+            CircuitDAG circuit,
+            CircuitDAG copy,
+            CircuitDAG pattern,
+            String replace,
+            Match match,
+            Set<Node> replaced,
+            Map<String, Expr> angleMap,
+            boolean applyOnce) {
 
-        // Skip if qubit mapping is invalid
-        if (match.patternToCircMap.size() != patternToCircuitQubit.values().size()) return;
+        Map<Node, Node> patternToCirc = match.patternToCircMap;
+        Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
 
-        // Build replacement QASM
-        String replace = lhs;
+        if (new HashSet<>(patternToCircuitQubit.values()).size() != patternToCircuitQubit.values().size()) {
+            return null;
+        }
+
+        if (copy == null) {
+            copy = new CircuitDAG(circuit);
+        }
+
         String[] searchList = new String[patternToCircuitQubit.size() * 2];
         String[] replaceList = new String[patternToCircuitQubit.size() * 2];
         int i = 0;
@@ -563,32 +447,56 @@ public class Optimizer {
             replaceList[i] = patternToCircuitQubit.get(key) + ";";
             i++;
         }
+
         String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
-        replaceAfterSubst = replaceAngles(replaceAfterSubst, match.angleMap);
+        replaceAfterSubst = replaceAngles(replaceAfterSubst, angleMap);
 
         CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
-        replace(circuit.getDag(), pattern, replaceDag, null, patternToCircuitQubit);
-    }
+        replaced.addAll(replaceDag.nodes());
 
+        // Apply replacement
+        replace(copy.getDag(), pattern, replaceDag, patternToCirc, patternToCircuitQubit);
 
-    public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String lhs, boolean applyOnce, Random rand) {
-        CircuitDAG copy = null;
-
-        List<Node> nodes = new ArrayList<>(circuit.nodes());
-        Collections.shuffle(nodes, rand);
-
-        for (Node n : nodes) {
-            Match match = matchAtNode(circuit, pattern, n);
-            if (match != null) {
-                if (copy == null) copy = new CircuitDAG(circuit); // lazy copy
-                applyMatch(copy, pattern, lhs, match);
-                if (applyOnce) return copy;
-            }
+        // Optionally stop after one match
+        if (applyOnce) {
+            return copy;
         }
 
+        // return updated circuit for continued search
         return copy;
     }
 
+    public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String replace, boolean applyOnce, Random rand) {
+        List<Node> roots = pattern.roots();
+        Node start = roots.get(0);
+        Map<Node, Node> patternToCirc = new HashMap<>();
+        Map<Edge, Edge> patternToCircEdges = new HashMap<>();
+        Map<String, Expr> angleMap = new HashMap<>();
+        Set<Node> matched = new HashSet<>();
+        Set<Node> replaced = new HashSet<>();
+        List<Map<Node, Node>> matches = new ArrayList<>();
+
+        CircuitDAG copy = null;
+        List<Node> nodes = new ArrayList<>(circuit.nodes());
+        Collections.shuffle(nodes, rand);
+
+        for (Node circN : nodes) {
+            Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
+
+            if (match != null) {
+                // applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
+                CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
+                if (result != null) {
+                    copy = result;
+                    if (applyOnce) {
+                        return copy;
+                    }
+                    circuit = copy;
+                }
+            }
+        }
+        return copy;
+    }
 
     public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
         List<Node> roots = pattern.roots();

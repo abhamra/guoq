@@ -25,4 +25,42 @@ public class Match {
         this.endDepth = endDepth;
         this.angleMap = angleMap;
     }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Match(");
+        sb.append("startNode=").append(startNode);
+        sb.append(", startDepth=").append(startDepth);
+        sb.append(", endDepth=").append(endDepth);
+
+        sb.append(", patternToCircMap={");
+        boolean first = true;
+        for (Map.Entry<Node, Node> e : patternToCircMap.entrySet()) {
+            if (!first) sb.append(", ");
+            Node patternNode = e.getKey();
+            Node circuitNode = e.getValue();
+            sb.append(patternNode)
+              .append(" -> ")
+              .append(circuitNode)
+              .append(" (depth=")
+              .append(circuitNode.getDepth())
+              .append(")");
+            first = false;
+        }
+        sb.append("}");
+
+        sb.append(", angleMap={");
+        first = true;
+        for (Map.Entry<String, Expr> e : angleMap.entrySet()) {
+            if (!first) sb.append(", ");
+            sb.append(e.getKey()).append("=").append(e.getValue());
+            first = false;
+        }
+        sb.append("}");
+
+        sb.append(")");
+        return sb.toString();
+    }
 }
+

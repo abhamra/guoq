@@ -13,6 +13,7 @@ public class OptimizerTest {
 
     @Test
     public void testRule1() {
+        // FIXME: Make this test work!!
         String circuit = "h q1; h q2; h q2; x q2;";
         String find = "h q0; h q0;";
         String replace = "";
