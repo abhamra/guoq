@@ -118,7 +118,6 @@ public class CircuitDAG {
         int maxDepth = 0;
 
         for (Node node : dag.vertexSet()) {
-            System.out.println("node depth: " + node.getDepth());
             maxDepth = Math.max(maxDepth, node.getDepth());
         }
 

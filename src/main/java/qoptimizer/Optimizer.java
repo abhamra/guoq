@@ -467,8 +467,6 @@ public class Optimizer {
     }
 
     public CircuitDAG find(CircuitDAG circuit, CircuitDAG pattern, String replace, boolean applyOnce, Random rand) {
-        List<Node> roots = pattern.roots();
-        Node start = roots.get(0);
         Map<Node, Node> patternToCirc = new HashMap<>();
         Map<Edge, Edge> patternToCircEdges = new HashMap<>();
         Map<String, Expr> angleMap = new HashMap<>();
@@ -484,7 +482,6 @@ public class Optimizer {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
 
             if (match != null) {
-                // applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
                 CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
                 if (result != null) {
                     copy = result;
@@ -498,9 +495,24 @@ public class Optimizer {
         return copy;
     }
 
+    // Checks if the [startDepth, endDepth] interval overlaps with
+    // any currently claimed intervals
+    private boolean overlaps(Pair<Integer, Integer>[] claimedIntervals,
+                             int startDepth, int endDepth) {
+        for (Pair<Integer, Integer> interval : claimedIntervals) {
+            if (interval == null) continue;
+            int s = interval.getFirst();
+            int e = interval.getSecond();
+
+            // overlap test: [startDepth, endDepth) intersects [s, e)
+            if (startDepth < e && endDepth > s) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
-        List<Node> roots = pattern.roots();
-        Node start = roots.get(0);
         Map<Node, Node> patternToCirc = new HashMap<>();
         Map<Edge, Edge> patternToCircEdges = new HashMap<>();
         Map<String, Expr> angleMap = new HashMap<>();
@@ -509,126 +521,31 @@ public class Optimizer {
         List<Map<Node, Node>> matches = new ArrayList<>();
 
         CircuitDAG copy = null;
-        // List<Node> nodes = new ArrayList<>(circuit.nodes());
-        List<Node> nodesInWindow = circuit.nodes().stream().filter(n -> n.getDepth() >= startDepth && n.getDepth() <= endDepth).toList();
+        List<Node> nodesInWindow = circuit.nodes().stream()
+            .filter(n -> n.getDepth() >= startDepth && n.getDepth() <= endDepth)
+            .collect(Collectors.toCollection(ArrayList::new));
         Collections.shuffle(nodesInWindow, rand);
 
         for (Node circN : nodesInWindow) {
-            patternToCirc.clear();
-            patternToCircEdges.clear();
-            angleMap.clear();
-            if (matched.contains(circN) || replaced.contains(circN)) {
-                continue;
-            }
-            if (circN.isGate() && circN.getId().equals(start.getId())) {
-                patternToCirc.put(start, circN);
-                if (start.getAngles() != null) {
-                    if (!matchAngles(circN, start, angleMap)) {
-                        continue;
-                    }
-                }
-                List<Node> succsToVisit = new ArrayList<>();
-                List<Node> ancsToVisit = new ArrayList<>();
-                Set<Node> seen = new HashSet<>();
+            Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
 
-                if (!matchOutgoing(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-                    continue;
-                }
-                if (!matchIncoming(circuit.getDag(), pattern.getDag(), circN, start, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-                    continue;
-                }
-                seen.add(start);
+            if (match != null) {
 
-                boolean match = true;
-                while (!succsToVisit.isEmpty() || !ancsToVisit.isEmpty()) {
-                    while (!succsToVisit.isEmpty()) {
-                        Node succ = succsToVisit.get(0);
-                        succsToVisit.remove(0);
+                rwl.readLock().lock();
+                boolean conflict = overlaps(claimedIntervals, startDepth, endDepth);
+                rwl.readLock().unlock();
 
-                        if (seen.contains(succ)) {
-                            continue;
-                        }
+                if (conflict) continue; // don't add this match to the circuit, exists overlap
 
-                        if (matched.contains(patternToCirc.get(succ)) || replaced.contains(patternToCirc.get(succ))) {
-                            match = false;
-                            break;
-                        }
+                CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
+                if (result != null) {
+                    copy = result;
 
-                        if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-                            match = false;
-                            break;
-                        }
-                        if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(succ), succ, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-                            match = false;
-                            break;
-                        }
-                        seen.add(succ);
-                    }
-                    if (!match) {
-                        break;
-                    }
+                    // update claimedIntervals
+                    rwl.writeLock().lock();
+                    claimedIntervals[windowIdx] = new Pair<>(startDepth, endDepth);
+                    rwl.writeLock().unlock();
 
-                    while (!ancsToVisit.isEmpty()) {
-                        Node anc = ancsToVisit.get(0);
-                        ancsToVisit.remove(0);
-
-                        if (seen.contains(anc)) {
-                            continue;
-                        }
-
-                        if (matched.contains(patternToCirc.get(anc)) || replaced.contains(patternToCirc.get(anc))) {
-                            match = false;
-                            break;
-                        }
-
-                        if (!matchOutgoing(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, succsToVisit)) {
-                            match = false;
-                            break;
-                        }
-                        if (!matchIncoming(circuit.getDag(), pattern.getDag(), patternToCirc.get(anc), anc, patternToCirc, patternToCircEdges, angleMap, ancsToVisit)) {
-                            match = false;
-                            break;
-                        }
-                        seen.add(anc);
-                    }
-                    if (!match) {
-                        break;
-                    }
-                }
-                if (!match) {
-                    continue;
-                }
-                if (patternToCirc.size() == pattern.totalGateCount()) {
-                    matched.addAll(patternToCirc.values());
-                    matches.add(new HashMap<>(patternToCirc));
-
-                    Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
-                    if (new HashSet<>(patternToCircuitQubit.values()).size() != patternToCircuitQubit.values().size()) {
-                        continue;
-                    }
-
-                    if (copy == null) {
-                        copy = new CircuitDAG(circuit);
-                    }
-
-                    String[] searchList = new String[patternToCircuitQubit.size() * 2];
-                    String[] replaceList = new String[patternToCircuitQubit.size() * 2];
-                    int i = 0;
-                    for (String key : patternToCircuitQubit.keySet()) {
-                        searchList[i] = key + ",";
-                        replaceList[i] = patternToCircuitQubit.get(key) + ",";
-                        i++;
-                        searchList[i] = key + ";";
-                        replaceList[i] = patternToCircuitQubit.get(key) + ";";
-                        i++;
-                    }
-                    String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
-                    replaceAfterSubst = replaceAngles(replaceAfterSubst, angleMap);
-
-                    CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
-                    replaced.addAll(replaceDag.nodes());
-
-                    replace(copy.getDag(), pattern, replaceDag, patternToCirc, patternToCircuitQubit);
                     if (applyOnce) {
                         return copy;
                     }
@@ -636,6 +553,7 @@ public class Optimizer {
                 }
             }
         }
+        
         return copy;
     }
 
@@ -779,6 +697,8 @@ public class Optimizer {
     //    we can check this via the claimedIntervals structure
     // 3. Don't need to collect stuff later
     public CircuitDAG applyRuleParallel(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+        // FIXME: Remove this after testing done
+        System.out.println("IN APPLY RULE PARALLEL");
         // Call this just in case we forgot, for each rule
         circuit.assignDepthToNodes();
         pattern.assignDepthToNodes();
@@ -2263,7 +2183,8 @@ public class Optimizer {
                         Pair<CircuitDAG, String> rule = rules.get(ruleToUse);
                         String[] splitRule = rule.getSecond().split(" \\| ");
                         var rulesApplied = new ArrayList<>(c.getRulesApplied());
-                        CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
+                        // CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
+                        CircuitDAG cPrime = applyRuleParallel(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
                         candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
                         if (cPrime != c.getCircuit()) {
                             rulesApplied.add(new Pair(rule.getSecond(), candidate.getCircuit().totalGateCount()));

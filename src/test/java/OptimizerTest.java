@@ -18,7 +18,7 @@ public class OptimizerTest {
         String find = "h q0; h q0;";
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("h q1;\nx q2;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
