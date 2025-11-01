@@ -53,6 +53,70 @@ public class CircuitDAG {
         this.assignDepthToNodes();
     }
 
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== CircuitDAG ===\n");
+
+        // Header
+        if (qasmHeader != null && !qasmHeader.isEmpty()) {
+            sb.append("Header: ").append(qasmHeader).append("\n");
+        }
+
+        // Basic stats
+        sb.append("Qubits: ").append(qubits != null ? qubits : "none").append("\n");
+        sb.append("Total nodes: ").append(dag != null ? dag.vertexSet().size() : 0).append("\n");
+        sb.append("Total edges: ").append(dag != null ? dag.edgeSet().size() : 0).append("\n\n");
+
+        // Qubit rename map
+        if (qubitRenameMap != null && !qubitRenameMap.isEmpty()) {
+            sb.append("Qubit Rename Map:\n");
+            for (Map.Entry<String, String> e : qubitRenameMap.entrySet()) {
+                sb.append("  ").append(e.getKey()).append(" -> ").append(e.getValue()).append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Nodes
+        sb.append("Nodes:\n");
+        if (dag != null) {
+            for (Node n : dag.vertexSet()) {
+                sb.append("  Node ").append(n.getId());
+                if (n.isGate()) {
+                    sb.append(" (Gate: ").append(n.getId());
+                    if (n.getQubits() != null && !n.getQubits().isEmpty()) {
+                        sb.append(", Qubits: ").append(n.getQubits());
+                    }
+                    sb.append(")");
+                }
+                if (n.getDepth() >= 0) {
+                    sb.append(" [Depth: ").append(n.getDepth()).append("]");
+                }
+                sb.append("\n");
+            }
+        } else {
+            sb.append("  (no nodes)\n");
+        }
+
+        // Edges
+        sb.append("\nEdges:\n");
+        if (dag != null) {
+            for (Edge e : dag.edgeSet()) {
+                Node src = dag.getEdgeSource(e);
+                Node tgt = dag.getEdgeTarget(e);
+                sb.append("  ").append(src.getId()).append(" -> ").append(tgt.getId());
+                if (e.getQubit() != null) {
+                    sb.append(" [q=").append(e.getQubit()).append("]");
+                }
+                sb.append("\n");
+            }
+        } else {
+            sb.append("  (no edges)\n");
+        }
+
+        return sb.toString();
+    }
+
     public String toQASM() {
         TopologicalOrderIterator<Node, Edge> dagIter = new TopologicalOrderIterator<>(dag);
 

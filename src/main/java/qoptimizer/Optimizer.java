@@ -414,7 +414,7 @@ public class Optimizer {
         return new Match(startNode, patternToCirc, startDepth, endDepth, angleMap);
     }
 
-    // Actually changes the CircuitDAG by applying the match from `matchAtNode`
+    // Actually changes the CircuitDAG by applying the match from `matchAtNode`, does this in-place
     private CircuitDAG applyMatch(
             CircuitDAG circuit,
             CircuitDAG copy,
@@ -530,14 +530,15 @@ public class Optimizer {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
 
             if (match != null) {
-
                 rwl.readLock().lock();
                 boolean conflict = overlaps(claimedIntervals, startDepth, endDepth);
                 rwl.readLock().unlock();
 
                 if (conflict) continue; // don't add this match to the circuit, exists overlap
 
-                CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
+                // NOTE: applyMatch works in-place with this call (we don't use copy at all)
+                // Can we modify the regular find similarly?
+                CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, replaced, angleMap, applyOnce);
                 if (result != null) {
                     copy = result;
 
@@ -728,7 +729,7 @@ public class Optimizer {
         }
 
         // wait for all threads to finish
-        for (Future<?> f : futures) {
+        for (Future<CircuitDAG> f : futures) {
             try {
                 f.get();
             } catch (InterruptedException | ExecutionException e) {
