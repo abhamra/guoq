@@ -528,6 +528,7 @@ public class Optimizer {
 
         for (Node circN : nodesInWindow) {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
+            System.out.println("found a match!");
 
             if (match != null) {
                 rwl.readLock().lock();
@@ -536,22 +537,56 @@ public class Optimizer {
 
                 if (conflict) continue; // don't add this match to the circuit, exists overlap
 
-                // NOTE: applyMatch works in-place with this call (we don't use copy at all)
-                // Can we modify the regular find similarly?
-                CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, replaced, angleMap, applyOnce);
-                if (result != null) {
-                    copy = result;
-
-                    // update claimedIntervals
-                    rwl.writeLock().lock();
-                    claimedIntervals[windowIdx] = new Pair<>(startDepth, endDepth);
-                    rwl.writeLock().unlock();
-
-                    if (applyOnce) {
-                        return copy;
+                // We’re about to mutate the shared DAG, so take the write lock
+                rwl.writeLock().lock();
+                try {
+                    System.out.println("applying a match!");
+                    System.out.println(Arrays.stream(claimedIntervals)
+                        .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                        .collect(Collectors.joining(", ", "claimedIntervals before: ", "")));
+            
+                    CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, replaced, angleMap, applyOnce);
+                    if (result != null) {
+                        copy = result;
+                        claimedIntervals[windowIdx] = new Pair<>(startDepth, endDepth);
+            
+                        System.out.println(Arrays.stream(claimedIntervals)
+                            .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                            .collect(Collectors.joining(", ", "claimedIntervals after: ", "")));
+            
+                        if (applyOnce) return copy;
+                        circuit = copy;
                     }
-                    circuit = copy;
+                } finally {
+                    rwl.writeLock().unlock();
                 }
+
+                // // NOTE: applyMatch works in-place with this call (we don't use copy at all)
+                // // Can we modify the regular find similarly?
+                // System.out.println("applying a match!");
+                // // print the interval of the match before we apply it, or print claimedIntervals or something
+                // System.out.println("claimed intervals: \n");
+                // System.out.println(Arrays.stream(claimedIntervals)
+                //     .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                //     .collect(Collectors.joining(", ", "claimedIntervals: ", "")));
+                // CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, replaced, angleMap, applyOnce);
+                // if (result != null) {
+                //     copy = result;
+                //
+                //     // update claimedIntervals
+                //     rwl.writeLock().lock();
+                //     claimedIntervals[windowIdx] = new Pair<>(startDepth, endDepth);
+                //     System.out.println("claimed intervals: \n");
+                //     System.out.println(Arrays.stream(claimedIntervals)
+                //         .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                //         .collect(Collectors.joining(", ", "claimedIntervals: ", "")));
+                //     rwl.writeLock().unlock();
+                //
+                //     if (applyOnce) {
+                //         return copy;
+                //     }
+                //     circuit = copy;
+                // }
             }
         }
         
@@ -706,6 +741,7 @@ public class Optimizer {
         int patternDepth = pattern.getDepth();
         int circuitDepth = circuit.getDepth();
         int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+        System.out.println("numWindows = " + numWindows);
         int cores = Runtime.getRuntime().availableProcessors();
         
         // attempt to multithread :D
@@ -721,8 +757,8 @@ public class Optimizer {
         // Collect results: each thread returns its transformed sub-DAG or null
         for (int i = 0; i < numWindows; i++) {
             final int windowIndex = i;
-            final int startDepth = i * patternDepth;
-            final int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
+            int startDepth = i * patternDepth;
+            int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
             futures.add(threadPool.submit(() ->
                 findParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
             ));

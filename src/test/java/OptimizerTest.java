@@ -29,6 +29,8 @@ public class OptimizerTest {
         String replace = "cx q2,q0; cx q0,q1;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
         circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // FIXME: Fix this later!
+        // circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q0;\nx q1;\ncx q2,q0;\ncx q0,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -82,7 +84,8 @@ public class OptimizerTest {
         String find = "cx q0,q1; cx q1,q0;";
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // FIXME: Remove parallel later
+        circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q1;\nx q0;\nx q1;\nx q0;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
