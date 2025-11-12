@@ -11,12 +11,18 @@ import qoptimizer.ast.Symbol;
 import qoptimizer.ast.UnOp;
 import qoptimizer.ast.Var;
 
+import lombok.Getter;
+import lombok.Setter;
+
+@Getter
 public class Match {
     public final Node startNode;
     public final Map<Node, Node> patternToCircMap;
-    public final int startDepth;
-    public final int endDepth;
     public final Map<String, Expr> angleMap;
+
+    public int startDepth;
+    public int endDepth;
+
 
     public Match(Node startNode, Map<Node, Node> patternToCircMap, int startDepth, int endDepth, Map<String, Expr> angleMap) {
         this.startNode = startNode;

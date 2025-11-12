@@ -52,6 +52,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -512,6 +513,33 @@ public class Optimizer {
         return false;
     }
 
+
+    public ArrayList<Match> findMatchesParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
+        ArrayList<Match> foundMatches = new ArrayList<>();
+        Map<Node, Node> patternToCirc = new HashMap<>();
+        Map<Edge, Edge> patternToCircEdges = new HashMap<>();
+        Map<String, Expr> angleMap = new HashMap<>();
+        Set<Node> matched = new HashSet<>();
+        Set<Node> replaced = new HashSet<>();
+        List<Map<Node, Node>> matches = new ArrayList<>();
+
+        CircuitDAG copy = null;
+        List<Node> nodesInWindow = circuit.nodes().stream()
+            .filter(n -> n.getDepth() >= startDepth && n.getDepth() <= endDepth)
+            .collect(Collectors.toCollection(ArrayList::new));
+        Collections.shuffle(nodesInWindow, rand);
+
+        for (Node circN : nodesInWindow) {
+            Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
+            // System.out.println("found a match!");
+
+            if (match != null) {
+                foundMatches.add(match);
+            }
+        }
+        return foundMatches;
+    }
+
     public CircuitDAG findParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
         Map<Node, Node> patternToCirc = new HashMap<>();
         Map<Edge, Edge> patternToCircEdges = new HashMap<>();
@@ -713,6 +741,91 @@ public class Optimizer {
             return circuit;
         }
         return result;
+    }
+
+
+    public CircuitDAG applyRuleParallelNew(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+        // FIXME: Remove this after testing done
+        System.out.println("IN APPLY RULE PARALLEL");
+        // Call this just in case we forgot, for each rule
+        circuit.assignDepthToNodes();
+        pattern.assignDepthToNodes();
+        int patternDepth = pattern.getDepth();
+        int circuitDepth = circuit.getDepth();
+        int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+        System.out.println("numWindows = " + numWindows);
+        int cores = Runtime.getRuntime().availableProcessors();
+        
+        // attempt to multithread :D
+
+        // NOTE: claimedIntervals is allowed to use this structure because we ASSUME applyOnce = true
+        // For future, if/when we allow the ability to apply multiple times in a window, we can use
+        // claimedIntervals and only store the earliest match for a given window, because that is what will
+        // cause a conflict with the patternDepth overlap
+        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
+        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock(); // for claimedIntervals
+        ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
+        List<Future<ArrayList<Match>>> futures = new ArrayList<>();
+        // Collect results: each thread returns its transformed sub-DAG or null
+        for (int i = 0; i < numWindows; i++) {
+            final int windowIndex = i;
+            int startDepth = i * patternDepth;
+            int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
+            futures.add(threadPool.submit(() ->
+                findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
+            ));
+        }
+
+        // Step 1. collect all matches from all threads
+        List<Match> allMatches = new ArrayList<>();
+        for (Future<ArrayList<Match>> f : futures) {
+            try {
+                allMatches.addAll(f.get());
+            } catch (InterruptedException | ExecutionException e) {
+                e.printStackTrace();
+            }
+        }
+
+        threadPool.shutdown();
+
+        // Step 2. sort
+        allMatches.sort(Comparator.comparingInt(Match::getEndDepth));
+        
+        // Step 3. Select non-overlapping matches
+        List<Match> selected = new ArrayList<>();
+        int lastEnd = -1;
+        for (Match m : allMatches) {
+            if (m.getStartDepth() > lastEnd) {
+                selected.add(m);
+                lastEnd = m.getEndDepth();
+            }
+        }
+
+        // Step 4. Apply :D
+
+        // FIXME: Is this correct, or do we need to get the
+        // state from the matching phase and transfer it over here?
+        CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
+        Set<Node> replaced = new HashSet<>();
+        Map<String, Expr> angleMap = new HashMap<>();
+        for (Match m : selected) {
+            CircuitDAG updated = applyMatch(
+                circuit,   // original circuit DAG (for context)
+                copy,      // current working copy
+                pattern,
+                replace,
+                m,
+                replaced, // from where?
+                angleMap,
+                applyOnce
+            );
+            if (updated != null) {
+                copy = updated;
+                if (applyOnce) break; // optional early exit
+            }
+        }
+
+        return circuit; // updated in-place via findParallel
     }
 
     // Returns the updated CircuitDAG given some input pattern to apply, does rule matching and application in parallel
