@@ -13,13 +13,20 @@ public class OptimizerTest {
 
     @Test
     public void testRule1() {
-        // FIXME: Make this test work!!
-        String circuit = "h q1; h q2; h q2; x q2;";
-        String find = "h q0; h q0;";
-        String replace = "";
-        var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
-        assertEquals("h q1;\nx q2;\n", CircuitParser.dagToQasm(circuitDag));
+        try {
+            // FIXME: Make this test work!!
+            String circuit = "h q1; h q2; h q2; x q2;";
+            String find = "h q0; h q0;";
+            String replace = "";
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            // circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+            // circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+            circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+            assertEquals("h q1;\nx q2;\n", CircuitParser.dagToQasm(circuitDag));
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw e;
+        }
     }
 
     @Test

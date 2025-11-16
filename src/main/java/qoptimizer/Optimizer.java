@@ -345,6 +345,10 @@ public class Optimizer {
         patternToCirc.clear();
         patternToCircEdges.clear();
         angleMap.clear();
+        
+        // NOTE: It seems like we don't use replaced at all here, but replaced
+        // is stateful in find, findParallel, and findMatchesParallel
+
         if (matched.contains(startNode) || replaced.contains(startNode)) {
             return null;
         }
@@ -412,7 +416,8 @@ public class Optimizer {
         int startDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).min().orElse(startNode.getDepth());
         int endDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).max().orElse(startNode.getDepth()) + 1;
 
-        return new Match(startNode, patternToCirc, startDepth, endDepth, angleMap);
+        // NOTE: Introducing deep copies for patternToCirc, angleMap
+        return new Match(startNode, new HashMap<>(patternToCirc), startDepth, endDepth, new HashMap<>(angleMap), matched, replaced);
     }
 
     // Actually changes the CircuitDAG by applying the match from `matchAtNode`, does this in-place
@@ -422,10 +427,8 @@ public class Optimizer {
             CircuitDAG pattern,
             String replace,
             Match match,
-            Set<Node> replaced,
-            Map<String, Expr> angleMap,
             boolean applyOnce) {
-
+        System.out.println("in applymatch");
         Map<Node, Node> patternToCirc = match.patternToCircMap;
         Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
 
@@ -450,10 +453,10 @@ public class Optimizer {
         }
 
         String replaceAfterSubst = StringUtils.replaceEach(replace, searchList, replaceList);
-        replaceAfterSubst = replaceAngles(replaceAfterSubst, angleMap);
+        replaceAfterSubst = replaceAngles(replaceAfterSubst, match.angleMap);
 
         CircuitDAG replaceDag = CircuitParser.qasmToDag(replaceAfterSubst);
-        replaced.addAll(replaceDag.nodes());
+        match.replaced.addAll(replaceDag.nodes());
 
         // Apply replacement
         replace(copy.getDag(), pattern, replaceDag, patternToCirc, patternToCircuitQubit);
@@ -483,7 +486,7 @@ public class Optimizer {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
 
             if (match != null) {
-                CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, replaced, angleMap, applyOnce);
+                CircuitDAG result = applyMatch(circuit, copy, pattern, replace, match, applyOnce);
                 if (result != null) {
                     copy = result;
                     if (applyOnce) {
@@ -517,6 +520,7 @@ public class Optimizer {
     public ArrayList<Match> findMatchesParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
         ArrayList<Match> foundMatches = new ArrayList<>();
         Map<Node, Node> patternToCirc = new HashMap<>();
+        int patternDepth = pattern.getDepth();
         Map<Edge, Edge> patternToCircEdges = new HashMap<>();
         Map<String, Expr> angleMap = new HashMap<>();
         Set<Node> matched = new HashSet<>();
@@ -531,9 +535,17 @@ public class Optimizer {
 
         for (Node circN : nodesInWindow) {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
-            // System.out.println("found a match!");
+            System.out.println("found a match find matches parallel!");
 
             if (match != null) {
+
+                if (match.startDepth < startDepth ||
+                    match.startDepth >= (windowIdx+1)*patternDepth) {
+                    // throw it away: match belongs to a different window
+                    System.out.println("PROBLEM HERE");
+                    continue;
+                } // else
+
                 foundMatches.add(match);
             }
         }
@@ -556,7 +568,7 @@ public class Optimizer {
 
         for (Node circN : nodesInWindow) {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
-            System.out.println("found a match!");
+            // System.out.println("found a match!");
 
             if (match != null) {
                 rwl.readLock().lock();
@@ -568,19 +580,19 @@ public class Optimizer {
                 // We’re about to mutate the shared DAG, so take the write lock
                 rwl.writeLock().lock();
                 try {
-                    System.out.println("applying a match!");
-                    System.out.println(Arrays.stream(claimedIntervals)
-                        .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
-                        .collect(Collectors.joining(", ", "claimedIntervals before: ", "")));
+                    // System.out.println("applying a match!");
+                    // System.out.println(Arrays.stream(claimedIntervals)
+                    //     .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                    //     .collect(Collectors.joining(", ", "claimedIntervals before: ", "")));
             
-                    CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, replaced, angleMap, applyOnce);
+                    CircuitDAG result = applyMatch(circuit, circuit, pattern, replace, match, applyOnce);
                     if (result != null) {
                         copy = result;
                         claimedIntervals[windowIdx] = new Pair<>(startDepth, endDepth);
             
-                        System.out.println(Arrays.stream(claimedIntervals)
-                            .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
-                            .collect(Collectors.joining(", ", "claimedIntervals after: ", "")));
+                        // System.out.println(Arrays.stream(claimedIntervals)
+                        //     .map(p -> p == null ? "[unclaimed]" : "[" + p.getFirst() + "," + p.getSecond() + "]")
+                        //     .collect(Collectors.joining(", ", "claimedIntervals after: ", "")));
             
                         if (applyOnce) return copy;
                         circuit = copy;
@@ -746,14 +758,14 @@ public class Optimizer {
 
     public CircuitDAG applyRuleParallelNew(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
         // FIXME: Remove this after testing done
-        System.out.println("IN APPLY RULE PARALLEL");
+        System.out.println("IN APPLY RULE PARALLEL NEW");
         // Call this just in case we forgot, for each rule
         circuit.assignDepthToNodes();
         pattern.assignDepthToNodes();
         int patternDepth = pattern.getDepth();
         int circuitDepth = circuit.getDepth();
         int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
-        System.out.println("numWindows = " + numWindows);
+        // System.out.println("numWindows = " + numWindows);
         int cores = Runtime.getRuntime().availableProcessors();
         
         // attempt to multithread :D
@@ -801,11 +813,20 @@ public class Optimizer {
             }
         }
 
+
+        CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
+
+        System.out.println("Printing all matches!");
+        for (Match m : selected) {
+            System.out.println(m);
+        }
+
         // Step 4. Apply :D
+        // NOTE: Perhaps we can have the `replace` set be stateful so we don't overwrite?
+        // But this should never be possible, so do we just ignore for now?
 
         // FIXME: Is this correct, or do we need to get the
         // state from the matching phase and transfer it over here?
-        CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
         Set<Node> replaced = new HashSet<>();
         Map<String, Expr> angleMap = new HashMap<>();
         for (Match m : selected) {
@@ -815,8 +836,6 @@ public class Optimizer {
                 pattern,
                 replace,
                 m,
-                replaced, // from where?
-                angleMap,
                 applyOnce
             );
             if (updated != null) {
@@ -847,14 +866,14 @@ public class Optimizer {
     // 3. Don't need to collect stuff later
     public CircuitDAG applyRuleParallel(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
         // FIXME: Remove this after testing done
-        System.out.println("IN APPLY RULE PARALLEL");
+        // System.out.println("IN APPLY RULE PARALLEL");
         // Call this just in case we forgot, for each rule
         circuit.assignDepthToNodes();
         pattern.assignDepthToNodes();
         int patternDepth = pattern.getDepth();
         int circuitDepth = circuit.getDepth();
         int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
-        System.out.println("numWindows = " + numWindows);
+        // System.out.println("numWindows = " + numWindows);
         int cores = Runtime.getRuntime().availableProcessors();
         
         // attempt to multithread :D
@@ -2333,8 +2352,7 @@ public class Optimizer {
                         Pair<CircuitDAG, String> rule = rules.get(ruleToUse);
                         String[] splitRule = rule.getSecond().split(" \\| ");
                         var rulesApplied = new ArrayList<>(c.getRulesApplied());
-                        // CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
-                        CircuitDAG cPrime = applyRuleParallel(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
+                        CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
                         candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
                         if (cPrime != c.getCircuit()) {
                             rulesApplied.add(new Pair(rule.getSecond(), candidate.getCircuit().totalGateCount()));
@@ -2407,6 +2425,8 @@ public class Optimizer {
 
     // TODO: Implement this with applyRuleParallel, findParallel, etc!
     // (And the same functions for symb rules!)
+
+    // FIXME: use applyRuleParallelNew (AFTER TESTING)
     public OptCircuit optimizeBeamMCMCParallel(OptCircuit circuit,
                                        HashMap<String, Integer> ruleCount,
                                        boolean onlySymb,
@@ -2715,6 +2735,8 @@ public class Optimizer {
             optimized = optimizeStochastic(initialCircuit, file.getName(), ruleFileName, symbRuleFileName, output);
         } else if (Params.SEARCH_STRATEGY == SearchStrategy.BEAM_MCMC) {
             optimized = optimizeBeamMCMC(initialCircuit, allRulesApplied, false, file.getName(), ruleFileName, symbRuleFileName, output);
+        } else if (Params.SEARCH_STRATEGY == SearchStrategy.BEAM_MCMC_PARALLEL) {
+            optimized = optimizeBeamMCMCParallel(initialCircuit, allRulesApplied, false, file.getName(), ruleFileName, symbRuleFileName, output);
         } else {
             throw new RuntimeException("Unsupported search strategy: " + Params.SEARCH_STRATEGY);
         }

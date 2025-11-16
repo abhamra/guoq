@@ -14,22 +14,49 @@ import qoptimizer.ast.Var;
 import lombok.Getter;
 import lombok.Setter;
 
+/* 
+    private CircuitDAG applyMatch(
+            CircuitDAG circuit,
+            CircuitDAG copy,
+            CircuitDAG pattern,
+            String replace,
+            Match match,
+            Set<Node> replaced,
+            Map<String, Expr> angleMap,
+            boolean applyOnce) {
+ *
+ * */
+
+// TODO: Add correct information to Match class so we
+// can basically just pass it in and not have to think about
+// other confusing data transfer stuff
+
+// NOTE: Update the printer, and update:
+// 1. The Match object that matchAtNode returns
+// 2. The applyMatch function signature
+
 @Getter
 public class Match {
     public final Node startNode;
-    public final Map<Node, Node> patternToCircMap;
-    public final Map<String, Expr> angleMap;
-
     public int startDepth;
     public int endDepth;
 
+    public final Map<Node, Node> patternToCircMap;
+    public final Map<String, Expr> angleMap;
+    public final Set<Node> matched;
+    public final Set<Node> replaced;
 
-    public Match(Node startNode, Map<Node, Node> patternToCircMap, int startDepth, int endDepth, Map<String, Expr> angleMap) {
+
+
+    public Match(Node startNode, Map<Node, Node> patternToCircMap, int startDepth, int endDepth, Map<String, Expr> angleMap,
+            Set<Node> matched, Set<Node> replaced) {
         this.startNode = startNode;
         this.patternToCircMap = patternToCircMap;
         this.startDepth = startDepth;
         this.endDepth = endDepth;
         this.angleMap = angleMap;
+        this.matched = matched;
+        this.replaced = replaced;
     }
 
     @Override
@@ -65,8 +92,31 @@ public class Match {
         }
         sb.append("}");
 
+        sb.append(", matched=");
+        sb.append(summarizeSet(matched));
+
+        sb.append(", replaced=");
+        sb.append(summarizeSet(replaced));
+
         sb.append(")");
         return sb.toString();
     }
+
+    private String summarizeSet(Set<Node> set) {
+        if (set == null) return "null";
+        int size = set.size();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("[size=").append(size);
+
+        for (Node n : set) {
+            sb.append(", ").append(n.toString());
+        }
+
+        if (size > 3) sb.append(", ...");
+        sb.append("]");
+        return sb.toString();
+    }
+
 }
 
