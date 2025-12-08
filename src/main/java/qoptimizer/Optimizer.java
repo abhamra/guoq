@@ -428,7 +428,6 @@ public class Optimizer {
             String replace,
             Match match,
             boolean applyOnce) {
-        System.out.println("in applymatch");
         Map<Node, Node> patternToCirc = match.patternToCircMap;
         Map<String, String> patternToCircuitQubit = patternToCircuitQubit(patternToCirc);
 
@@ -535,14 +534,12 @@ public class Optimizer {
 
         for (Node circN : nodesInWindow) {
             Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
-            System.out.println("found a match find matches parallel!");
+            // System.out.println("found a match find matches parallel!");
 
             if (match != null) {
 
                 if (match.startDepth < startDepth ||
                     match.startDepth >= (windowIdx+1)*patternDepth) {
-                    // throw it away: match belongs to a different window
-                    System.out.println("PROBLEM HERE");
                     continue;
                 } // else
 
@@ -816,10 +813,10 @@ public class Optimizer {
 
         CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
 
-        System.out.println("Printing all matches!");
-        for (Match m : selected) {
-            System.out.println(m);
-        }
+        // System.out.println("Printing all matches!");
+        // for (Match m : selected) {
+        //     System.out.println(m);
+        // }
 
         // Step 4. Apply :D
         // NOTE: Perhaps we can have the `replace` set be stateful so we don't overwrite?
@@ -844,7 +841,7 @@ public class Optimizer {
             }
         }
 
-        return circuit; // updated in-place via findParallel
+        return copy; // updated in-place via findParallel
     }
 
     // Returns the updated CircuitDAG given some input pattern to apply, does rule matching and application in parallel
