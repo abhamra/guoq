@@ -2,9 +2,14 @@ import org.junit.jupiter.api.Test;
 import qoptimizer.Optimizer;
 import qoptimizer.parser.CircuitParser;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class OptimizerTest {
 
@@ -35,9 +40,9 @@ public class OptimizerTest {
         String find = "cx q0,q1; cx q2,q0; cx q2,q1;";
         String replace = "cx q2,q0; cx q0,q1;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         // FIXME: Fix this later!
-        // circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q0;\nx q1;\ncx q2,q0;\ncx q0,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -47,7 +52,7 @@ public class OptimizerTest {
         String find = "cx q2,q1; cx q2,q0;";
         String replace = "cx q2,q0; cx q2,q1;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("t q2;\ncx q2,q0;\ncx q2,q1;\ncx q3,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -58,7 +63,7 @@ public class OptimizerTest {
         String find = "x q3; x q1; cx q3,q1; cx q2,q4; cx q2,q1;";
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q0;\nx q1;\ncx q0,q1;\ncx q2,q0;\ncx q2,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -69,7 +74,7 @@ public class OptimizerTest {
         String find = "t q1; cx q0,q1; tdg q1; cx q0,q1;";
         String replace = "cx q0,q1; tdg q1; cx q0,q1; t q1;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("t q4;\ncx q3,q5;\ncx q2,q4;\ncx q2,q6;\ntdg q4;\ncx q3,q4;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -80,7 +85,7 @@ public class OptimizerTest {
         String find = "s q0; cx q2,q0; cx q2,q1;";
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("s q2;\ncx q1,q2;\ncx q2,q3;\ntdg q3;\ncx q1,q3;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -92,7 +97,7 @@ public class OptimizerTest {
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
         // FIXME: Remove parallel later
-        circuitDag = applier.applyRuleParallel(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q1;\nx q0;\nx q1;\nx q0;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -113,7 +118,7 @@ public class OptimizerTest {
         String find = "h q0; cx q2,q0; h q0; cx q0,q1;";
         String replace = "cx q0,q1; h q0; cx q2,q0; h q0;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("h q0;\ncx q2,q0;\nh q0;\ncx q2,q3;\ncx q3,q1;\ncx q0,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -134,7 +139,7 @@ public class OptimizerTest {
         String find = "cx q2,q0; cx q1,q0";
         String replace = "cx q1,q0; cx q2,q0;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("cx q0,q3;\ncx q3,q4;\nt q4;\ntdg q3;\ncx q2,q3;\ncx q2,q4;\ncx q0,q4;\ncx q2,q1;\ntdg q4;\ncx q0,q3;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -145,8 +150,68 @@ public class OptimizerTest {
         String find = "rz(theta1) q0; rz(theta2) q0;";
         String replace = "rz(theta1+theta2) q0;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("", CircuitParser.dagToQasm(circuitDag));
+    }
+
+    // Helper method to load circuit from file
+    private String loadCircuitFromFile(String filepath) {
+        try {
+            return Files.readString(Path.of(filepath));
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load circuit file: " + filepath, e);
+        }
+    }
+
+    @Test
+    public void testParallelPerfBench() {
+        // Test that is more of a benchmark, for parallel vs not
+        String circuit = loadCircuitFromFile("latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
+        String find = "rz(theta1) q0;";
+        String replace = "";
+        int benchmarkIterations = 10;
+        
+        System.out.println("\nBenchmarking applyRule (sequential)...");
+        long sequentialTotal = 0;
+        for (int i = 0; i < benchmarkIterations; i++) {
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            var findDag = CircuitParser.qasmToDag(find);
+            
+            long startTime = System.nanoTime();
+            circuitDag = applier.applyRule(circuitDag, replace, findDag, false, rand);
+            long endTime = System.nanoTime();
+            
+            long duration = endTime - startTime;
+            sequentialTotal += duration;
+            System.out.printf("  Iteration %d: %.3f ms%n", i + 1, duration / 1_000_000.0);
+        }
+        
+        System.out.println("\nBenchmarking applyRuleParallelNew (parallel)...");
+        long parallelTotal = 0;
+        for (int i = 0; i < benchmarkIterations; i++) {
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            var findDag = CircuitParser.qasmToDag(find);
+            
+            long startTime = System.nanoTime();
+            // circuitDag = applier.applyRuleParallelNewTiming(circuitDag, replace, findDag, false, rand);
+            circuitDag = applier.applyRuleParallelNewTimingFull(circuitDag, replace, findDag, false, rand);
+            long endTime = System.nanoTime();
+            
+            long duration = endTime - startTime;
+            parallelTotal += duration;
+            System.out.printf("  Iteration %d: %.3f ms%n", i + 1, duration / 1_000_000.0);
+        }
+        
+        double sequentialAvg = sequentialTotal / (double) benchmarkIterations / 1_000_000.0;
+        double parallelAvg = parallelTotal / (double) benchmarkIterations / 1_000_000.0;
+        double speedup = sequentialAvg / parallelAvg;
+        
+        System.out.println("\n    BENCHMARK RESULTS");
+        System.out.printf("Sequential (applyRule) average: %.3f ms%n", sequentialAvg);
+        System.out.printf("Parallel (applyRuleParallelNew) average: %.3f ms%n", parallelAvg);
+        System.out.printf("Speedup: %.2fx%n", speedup);
+
+        assertTrue(parallelAvg < sequentialAvg); // Parallel should be faster
     }
 
     @Test
