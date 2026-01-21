@@ -5,8 +5,13 @@ import qoptimizer.parser.CircuitParser;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.IOException;
+import java.util.List;
 import java.util.ArrayList;
 import java.util.Random;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Comparator;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -212,6 +217,207 @@ public class OptimizerTest {
         System.out.printf("Speedup: %.2fx%n", speedup);
 
         assertTrue(parallelAvg < sequentialAvg); // Parallel should be faster
+    }
+
+    @Test
+    public void testThreadPoolSizeScaling() {
+        String circuit = loadCircuitFromFile("latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
+        String find = "rz(theta1) q0;";
+        String replace = "";
+        
+        int[] threadPoolSizes = {16, 32, 64, 128, 256, 512};
+        int sequentialIterations = 20;
+        int parallelIterations = 20;
+        
+        System.out.println("=== THREAD POOL SIZE SCALING TEST ===\n");
+        System.out.println("Circuit: latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
+        System.out.println("Pattern: rz(theta1) q0;");
+        System.out.println("Sequential iterations: " + sequentialIterations);
+        System.out.println("Parallel iterations per pool size: " + parallelIterations);
+        System.out.println("Available processors: " + Runtime.getRuntime().availableProcessors());
+        System.out.println("\n" + "=".repeat(80) + "\n");
+        
+        // ===== SEQUENTIAL BASELINE =====
+        System.out.println("BENCHMARKING SEQUENTIAL (applyRule)...\n");
+        List<Long> sequentialTimes = new ArrayList<>();
+        
+        for (int i = 0; i < sequentialIterations; i++) {
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            var findDag = CircuitParser.qasmToDag(find);
+            
+            long startTime = System.nanoTime();
+            circuitDag = applier.applyRule(circuitDag, replace, findDag, false, rand);
+            long endTime = System.nanoTime();
+            
+            long duration = endTime - startTime;
+            sequentialTimes.add(duration);
+            System.out.printf("  Iteration %2d: %.3f ms%n", i + 1, duration / 1_000_000.0);
+        }
+        
+        double sequentialAvg = sequentialTimes.stream().mapToLong(Long::longValue).average().orElse(0) / 1_000_000.0;
+        double sequentialMedian = calculateMedian(sequentialTimes) / 1_000_000.0;
+        double sequentialMin = sequentialTimes.stream().mapToLong(Long::longValue).min().orElse(0) / 1_000_000.0;
+        double sequentialMax = sequentialTimes.stream().mapToLong(Long::longValue).max().orElse(0) / 1_000_000.0;
+        
+        System.out.println("\nSequential Statistics:");
+        System.out.printf("  Average: %.3f ms%n", sequentialAvg);
+        System.out.printf("  Median:  %.3f ms%n", sequentialMedian);
+        System.out.printf("  Min:     %.3f ms%n", sequentialMin);
+        System.out.printf("  Max:     %.3f ms%n", sequentialMax);
+        System.out.println("\n" + "=".repeat(80) + "\n");
+        
+        // ===== PARALLEL WITH DIFFERENT THREAD POOL SIZES =====
+        Map<Integer, ParallelResult> results = new LinkedHashMap<>();
+        
+        for (int threadPoolSize : threadPoolSizes) {
+            System.out.printf("BENCHMARKING PARALLEL (threadPoolSize=%d)...\n\n", threadPoolSize);
+            List<Long> parallelTimes = new ArrayList<>();
+            
+            for (int i = 0; i < parallelIterations; i++) {
+                var circuitDag = CircuitParser.qasmToDag(circuit);
+                var findDag = CircuitParser.qasmToDag(find);
+                
+                long startTime = System.nanoTime();
+                circuitDag = applier.applyRuleParallelNewTimingThread(
+                    threadPoolSize, circuitDag, replace, findDag, false, rand
+                );
+                long endTime = System.nanoTime();
+                
+                long duration = endTime - startTime;
+                parallelTimes.add(duration);
+                System.out.printf("  Iteration %2d: %.3f ms%n", i + 1, duration / 1_000_000.0);
+            }
+            
+            double parallelAvg = parallelTimes.stream().mapToLong(Long::longValue).average().orElse(0) / 1_000_000.0;
+            double parallelMedian = calculateMedian(parallelTimes) / 1_000_000.0;
+            double parallelMin = parallelTimes.stream().mapToLong(Long::longValue).min().orElse(0) / 1_000_000.0;
+            double parallelMax = parallelTimes.stream().mapToLong(Long::longValue).max().orElse(0) / 1_000_000.0;
+            
+            ParallelResult result = new ParallelResult();
+            result.threadPoolSize = threadPoolSize;
+            result.avgTime = parallelAvg;
+            result.medianTime = parallelMedian;
+            result.minTime = parallelMin;
+            result.maxTime = parallelMax;
+            result.speedupAvg = sequentialAvg / parallelAvg;
+            result.speedupMedian = sequentialMedian / parallelMedian;
+            
+            results.put(threadPoolSize, result);
+            
+            System.out.printf("\nParallel Statistics (threadPoolSize=%d):%n", threadPoolSize);
+            System.out.printf("  Average: %.3f ms%n", parallelAvg);
+            System.out.printf("  Median:  %.3f ms%n", parallelMedian);
+            System.out.printf("  Min:     %.3f ms%n", parallelMin);
+            System.out.printf("  Max:     %.3f ms%n", parallelMax);
+            System.out.printf("  Speedup (avg):    %.3fx%n", result.speedupAvg);
+            System.out.printf("  Speedup (median): %.3fx%n", result.speedupMedian);
+            System.out.println("\n" + "=".repeat(80) + "\n");
+        }
+        
+        // ===== FINAL SUMMARY =====
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("FINAL SUMMARY");
+        System.out.println("=".repeat(80) + "\n");
+        
+        System.out.printf("Sequential Baseline: %.3f ms (median: %.3f ms)%n%n", sequentialAvg, sequentialMedian);
+        
+        System.out.println("Thread Pool Size Comparison:");
+        System.out.println("-".repeat(80));
+        System.out.printf("%-15s | %-12s | %-12s | %-12s | %-12s%n", 
+                         "Pool Size", "Avg Time", "Median Time", "Speedup (avg)", "Speedup (med)");
+        System.out.println("-".repeat(80));
+        
+        for (ParallelResult result : results.values()) {
+            System.out.printf("%-15d | %9.3f ms | %9.3f ms | %10.3fx | %10.3fx%n",
+                             result.threadPoolSize,
+                             result.avgTime,
+                             result.medianTime,
+                             result.speedupAvg,
+                             result.speedupMedian);
+        }
+        System.out.println("-".repeat(80));
+        
+        // Find best configuration
+        ParallelResult best = results.values().stream()
+            .max(Comparator.comparingDouble(r -> r.speedupMedian))
+            .orElse(null);
+        
+        if (best != null) {
+            System.out.printf("\nBest Configuration: Thread Pool Size = %d%n", best.threadPoolSize);
+            System.out.printf("  Best speedup: %.3fx (%.3f ms vs %.3f ms sequential)%n", 
+                             best.speedupMedian, best.medianTime, sequentialMedian);
+            
+            if (best.speedupMedian < 1.0) {
+                System.out.println("\n⚠ WARNING: Parallel implementation is slower than sequential!");
+                System.out.println("  Consider:");
+                System.out.println("  - Workload may be too small to benefit from parallelization");
+                System.out.println("  - Thread pool overhead dominates execution time");
+                System.out.println("  - Check if pattern actually exists in circuit");
+            } else {
+                System.out.printf("\n✓ Parallel implementation achieved %.1f%% speedup%n", 
+                                 (best.speedupMedian - 1) * 100);
+            }
+        }
+        
+        // Scaling efficiency analysis
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("SCALING EFFICIENCY ANALYSIS");
+        System.out.println("=".repeat(80) + "\n");
+        
+        ParallelResult baseline = results.get(threadPoolSizes[0]);
+        System.out.printf("Baseline (threads=%d): %.3f ms%n%n", baseline.threadPoolSize, baseline.medianTime);
+        
+        System.out.println("Relative Speedup vs Baseline:");
+        System.out.println("-".repeat(60));
+        System.out.printf("%-15s | %-15s | %-20s%n", "Pool Size", "Time", "Speedup vs Baseline");
+        System.out.println("-".repeat(60));
+        
+        for (ParallelResult result : results.values()) {
+            double relativeSpeedup = baseline.medianTime / result.medianTime;
+            System.out.printf("%-15d | %12.3f ms | %17.3fx%n",
+                             result.threadPoolSize,
+                             result.medianTime,
+                             relativeSpeedup);
+        }
+        System.out.println("-".repeat(60));
+        
+        // Check for diminishing returns
+        System.out.println("\nDiminishing Returns Analysis:");
+        List<Integer> sizes = new ArrayList<>(results.keySet());
+        for (int i = 1; i < sizes.size(); i++) {
+            int prevSize = sizes.get(i - 1);
+            int currSize = sizes.get(i);
+            double prevTime = results.get(prevSize).medianTime;
+            double currTime = results.get(currSize).medianTime;
+            double improvement = ((prevTime - currTime) / prevTime) * 100;
+            double threadsIncrease = ((double)(currSize - prevSize) / prevSize) * 100;
+            
+            System.out.printf("  %d → %d threads (+%.0f%%): %.1f%% faster%n",
+                             prevSize, currSize, threadsIncrease, improvement);
+        }
+    }
+
+    // Helper class to store results
+    private static class ParallelResult {
+        int threadPoolSize;
+        double avgTime;
+        double medianTime;
+        double minTime;
+        double maxTime;
+        double speedupAvg;
+        double speedupMedian;
+    }
+
+    // Helper method for median calculation
+    private double calculateMedian(List<Long> times) {
+        List<Long> sorted = new ArrayList<>(times);
+        Collections.sort(sorted);
+        int size = sorted.size();
+        if (size % 2 == 0) {
+            return (sorted.get(size/2 - 1) + sorted.get(size/2)) / 2.0;
+        } else {
+            return sorted.get(size/2);
+        }
     }
 
     @Test
