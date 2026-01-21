@@ -102,7 +102,10 @@ public class OptimizerTest {
         String replace = "";
         var circuitDag = CircuitParser.qasmToDag(circuit);
         // FIXME: Remove parallel later
-        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+
+        // circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRuleParallelNewTimingFull(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("x q1;\nx q0;\nx q1;\nx q0;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -123,7 +126,9 @@ public class OptimizerTest {
         String find = "h q0; cx q2,q0; h q0; cx q0,q1;";
         String replace = "cx q0,q1; h q0; cx q2,q0; h q0;";
         var circuitDag = CircuitParser.qasmToDag(circuit);
-        circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // circuitDag = applier.applyRuleParallelNew(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        // circuitDag = applier.applyRuleParallelNewTimingFull(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
+        circuitDag = applier.applyRule(circuitDag, replace, CircuitParser.qasmToDag(find), false, rand);
         assertEquals("h q0;\ncx q2,q0;\nh q0;\ncx q2,q3;\ncx q3,q1;\ncx q0,q1;\n", CircuitParser.dagToQasm(circuitDag));
     }
 
@@ -172,8 +177,9 @@ public class OptimizerTest {
     public void testParallelPerfBench() {
         // Test that is more of a benchmark, for parallel vs not
         String circuit = loadCircuitFromFile("latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
-        String find = "rz(theta1) q0;";
-        String replace = "";
+        // String find = "rz(theta1) q0;";
+        String find = "cx q2, q0; cx q2, q0;";
+        String replace = ";";
         int benchmarkIterations = 10;
         
         System.out.println("\nBenchmarking applyRule (sequential)...");

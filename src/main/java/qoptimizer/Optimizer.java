@@ -749,6 +749,7 @@ public class Optimizer {
         CircuitDAG pattern = rhs;
         var result = find(circuit, pattern, lhs, applyOnce, rand);
         if (result == null) {
+            System.out.println("FAILED TO APPLY RULE REGULAR");
             return circuit;
         }
         return result;
