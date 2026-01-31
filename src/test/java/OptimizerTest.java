@@ -178,9 +178,35 @@ public class OptimizerTest {
         // Test that is more of a benchmark, for parallel vs not
         String circuit = loadCircuitFromFile("latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
         // String find = "rz(theta1) q0;";
-        String find = "cx q2, q0; cx q2, q0;";
-        String replace = ";";
-        int benchmarkIterations = 10;
+        String find = "cx q0, q1; cx q1, q0; cx q0, q1;";
+        String replace = "cx q1, q0; cx q0, q1; cx q1, q0;";
+        int warmupIterations = 3;
+        int benchmarkIterations = 100;
+
+        // used for warm-up and nothing else
+        int[] threadPoolSizes = {16, 32, 64, 128, 256, 512};
+    
+        // Warmup sequential
+        System.out.println("Warming up sequential...");
+        for (int i = 0; i < warmupIterations; i++) {
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            var findDag = CircuitParser.qasmToDag(find);
+            applier.applyRule(circuitDag, replace, findDag, false, rand);
+            System.out.printf("  Warmup iteration %d complete%n", i + 1);
+        }
+        
+        // Warmup parallel for each thread pool size
+        System.out.println("\nWarming up parallel (all thread pool sizes)...");
+        for (int threadPoolSize : threadPoolSizes) {
+            System.out.printf("  Warming up threadPoolSize=%d...%n", threadPoolSize);
+            for (int i = 0; i < warmupIterations; i++) {
+                var circuitDag = CircuitParser.qasmToDag(circuit);
+                var findDag = CircuitParser.qasmToDag(find);
+                applier.applyRuleParallelNewTimingThread(
+                    threadPoolSize, circuitDag, replace, findDag, false, rand
+                );
+            }
+        }
         
         System.out.println("\nBenchmarking applyRule (sequential)...");
         long sequentialTotal = 0;
@@ -228,12 +254,38 @@ public class OptimizerTest {
     @Test
     public void testThreadPoolSizeScaling() {
         String circuit = loadCircuitFromFile("latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");
-        String find = "rz(theta1) q0;";
-        String replace = "";
+        // String find = "rz(theta1) q0;";
+        // String replace = "";
+        String find = "cx q0, q1; cx q1, q0; cx q0, q1;";
+        String replace = "cx q1, q0; cx q0, q1; cx q1, q0;";
         
         int[] threadPoolSizes = {16, 32, 64, 128, 256, 512};
+        int warmupIterations = 3;
         int sequentialIterations = 20;
         int parallelIterations = 20;
+
+
+        // Warmup sequential
+        System.out.println("Warming up sequential...");
+        for (int i = 0; i < warmupIterations; i++) {
+            var circuitDag = CircuitParser.qasmToDag(circuit);
+            var findDag = CircuitParser.qasmToDag(find);
+            applier.applyRule(circuitDag, replace, findDag, false, rand);
+            System.out.printf("  Warmup iteration %d complete%n", i + 1);
+        }
+        
+        // Warmup parallel for each thread pool size
+        System.out.println("\nWarming up parallel (all thread pool sizes)...");
+        for (int threadPoolSize : threadPoolSizes) {
+            System.out.printf("  Warming up threadPoolSize=%d...%n", threadPoolSize);
+            for (int i = 0; i < warmupIterations; i++) {
+                var circuitDag = CircuitParser.qasmToDag(circuit);
+                var findDag = CircuitParser.qasmToDag(find);
+                applier.applyRuleParallelNewTimingThread(
+                    threadPoolSize, circuitDag, replace, findDag, false, rand
+                );
+            }
+        }
         
         System.out.println("=== THREAD POOL SIZE SCALING TEST ===\n");
         System.out.println("Circuit: latest_sol__qft_N100_basis_rz_rx_ry_cx.qasm");

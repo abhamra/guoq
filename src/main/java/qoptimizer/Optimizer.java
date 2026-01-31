@@ -758,7 +758,7 @@ public class Optimizer {
 
     public CircuitDAG applyRuleParallelNew(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
         // FIXME: Remove this after testing done
-        System.out.println("IN APPLY RULE PARALLEL NEW");
+        // System.out.println("IN APPLY RULE PARALLEL NEW");
         // Call this just in case we forgot, for each rule
         circuit.assignDepthToNodes();
         pattern.assignDepthToNodes();
@@ -2939,7 +2939,7 @@ public class Optimizer {
                         var rulesApplied = new ArrayList<>(c.getRulesApplied());
                         // TODO: Make the apply rule parallel!
                         // FIXME: We currently default to applyOnce = true, for simplicity
-                        CircuitDAG cPrime = applyRule(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
+                        CircuitDAG cPrime = applyRuleParallelNew(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
                         candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
                         if (cPrime != c.getCircuit()) {
                             rulesApplied.add(new Pair(rule.getSecond(), candidate.getCircuit().totalGateCount()));
