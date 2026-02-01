@@ -745,11 +745,11 @@ public class Optimizer {
 
     public CircuitDAG applyRule(CircuitDAG circuit, String lhs, CircuitDAG rhs, boolean applyOnce, Random rand) {
         // FIXME: remove after testing done
-        System.out.println("IN APPLY RULE REGULAR");
+        // System.out.println("IN APPLY RULE REGULAR");
         CircuitDAG pattern = rhs;
         var result = find(circuit, pattern, lhs, applyOnce, rand);
         if (result == null) {
-            System.out.println("FAILED TO APPLY RULE REGULAR");
+            // System.out.println("FAILED TO APPLY RULE REGULAR");
             return circuit;
         }
         return result;
@@ -814,7 +814,7 @@ public class Optimizer {
         }
 
 
-        CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
+        // CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
 
         // System.out.println("Printing all matches!");
         // for (Match m : selected) {
@@ -832,19 +832,20 @@ public class Optimizer {
         for (Match m : selected) {
             CircuitDAG updated = applyMatch(
                 circuit,   // original circuit DAG (for context)
-                copy,      // current working copy
+                circuit,      // current working copy // NOTE: Changed to circuit from copy
                 pattern,
                 replace,
                 m,
                 applyOnce
             );
-            if (updated != null) {
-                copy = updated;
-                if (applyOnce) break; // optional early exit
-            }
+            // if (updated != null) {
+            //     circuit = updated; // NOTE: Changed to circuit from copy
+            //     if (applyOnce) break; // optional early exit
+            // }
+            if (updated != null && applyOnce) break;
         }
 
-        return copy; // updated in-place via findParallel
+        return circuit; // updated in-place via findParallel // NOTE: Changed to circuit from copy
     }
 
     public CircuitDAG applyRuleParallelNewTiming(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
@@ -933,7 +934,7 @@ public class Optimizer {
         System.out.printf("Step 3 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
                          (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
         
-        CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
+        // CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
         // System.out.println("Printing all matches!");
         // for (Match m : selected) {
         //     System.out.println(m);
@@ -950,16 +951,17 @@ public class Optimizer {
         for (Match m : selected) {
             CircuitDAG updated = applyMatch(
                 circuit,   // original circuit DAG (for context)
-                copy,      // current working copy
+                circuit,      // current working copy // NOTE: Changed to circuit from copy
                 pattern,
                 replace,
                 m,
                 applyOnce
             );
-            if (updated != null) {
-                copy = updated;
-                if (applyOnce) break; // optional early exit
-            }
+            // if (updated != null) {
+            //     circuit = updated; // NOTE: Changed to circuit from copy
+            //     if (applyOnce) break; // optional early exit
+            // }
+            if (updated != null && applyOnce) break;
         }
         long applyEnd = System.nanoTime();
         System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
@@ -968,7 +970,7 @@ public class Optimizer {
         long grandTotal = (applyEnd - poolCreateStart);
         System.out.printf("TOTAL TIME: %.3f ms%n", grandTotal / 1_000_000.0);
         
-        return copy; // updated in-place via findParallel
+        return circuit; // updated in-place via findParallel
     }
 
     public CircuitDAG applyRuleParallelNewTimingFull(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
@@ -1061,7 +1063,7 @@ public class Optimizer {
         
         // Measure circuit copy (THIS IS LIKELY EXPENSIVE!)
         long copyStart = System.nanoTime();
-        CircuitDAG copy = new CircuitDAG(circuit);
+        // CircuitDAG copy = new CircuitDAG(circuit);
         long copyEnd = System.nanoTime();
         System.out.printf("Circuit copy creation: %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
         
@@ -1071,17 +1073,18 @@ public class Optimizer {
         Map<String, Expr> angleMap = new HashMap<>();
         for (Match m : selected) {
             CircuitDAG updated = applyMatch(
-                circuit,
-                copy,
+                circuit,   // original circuit DAG (for context)
+                circuit,      // current working copy // NOTE: Changed to circuit from copy
                 pattern,
                 replace,
                 m,
                 applyOnce
             );
-            if (updated != null) {
-                copy = updated;
-                if (applyOnce) break;
-            }
+            // if (updated != null) {
+            //     circuit = updated; // NOTE: Changed to circuit from copy
+            //     if (applyOnce) break; // optional early exit
+            // }
+            if (updated != null && applyOnce) break;
         }
         long applyEnd = System.nanoTime();
         System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
@@ -1110,7 +1113,7 @@ public class Optimizer {
         System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
         System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
         
-        return copy;
+        return circuit;
     }
 
 
@@ -1197,7 +1200,7 @@ public class Optimizer {
         
         // Measure circuit copy (THIS IS LIKELY EXPENSIVE!)
         long copyStart = System.nanoTime();
-        CircuitDAG copy = new CircuitDAG(circuit);
+        // CircuitDAG copy = new CircuitDAG(circuit);
         long copyEnd = System.nanoTime();
         System.out.printf("Circuit copy creation: %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
         
@@ -1207,17 +1210,18 @@ public class Optimizer {
         Map<String, Expr> angleMap = new HashMap<>();
         for (Match m : selected) {
             CircuitDAG updated = applyMatch(
-                circuit,
-                copy,
+                circuit,   // original circuit DAG (for context)
+                circuit,      // current working copy // NOTE: Changed to circuit from copy
                 pattern,
                 replace,
                 m,
                 applyOnce
             );
-            if (updated != null) {
-                copy = updated;
-                if (applyOnce) break;
-            }
+            // if (updated != null) {
+            //     circuit = updated; // NOTE: Changed to circuit from copy
+            //     if (applyOnce) break; // optional early exit
+            // }
+            if (updated != null && applyOnce) break;
         }
         long applyEnd = System.nanoTime();
         System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
@@ -1246,7 +1250,7 @@ public class Optimizer {
         System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
         System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
         
-        return copy;
+        return circuit;
     }
 
     // Returns the updated CircuitDAG given some input pattern to apply, does rule matching and application in parallel
