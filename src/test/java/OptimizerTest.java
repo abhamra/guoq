@@ -180,8 +180,8 @@ public class OptimizerTest {
         // String find = "rz(theta1) q0;";
         String find = "cx q0, q1; cx q1, q0; cx q0, q1;";
         String replace = "cx q1, q0; cx q0, q1; cx q1, q0;";
-        int warmupIterations = 3;
-        int benchmarkIterations = 100;
+        int warmupIterations = 10;
+        int benchmarkIterations = 200;
 
         // used for warm-up and nothing else
         int[] threadPoolSizes = {16, 32, 64, 128, 256, 512};
@@ -202,8 +202,8 @@ public class OptimizerTest {
             for (int i = 0; i < warmupIterations; i++) {
                 var circuitDag = CircuitParser.qasmToDag(circuit);
                 var findDag = CircuitParser.qasmToDag(find);
-                applier.applyRuleParallelNewTimingThread(
-                    threadPoolSize, circuitDag, replace, findDag, false, rand
+                applier.applyRuleParallelNew( // no thread ver
+                    circuitDag, replace, findDag, false, rand
                 );
             }
         }
@@ -231,7 +231,8 @@ public class OptimizerTest {
             
             long startTime = System.nanoTime();
             // circuitDag = applier.applyRuleParallelNewTiming(circuitDag, replace, findDag, false, rand);
-            circuitDag = applier.applyRuleParallelNewTimingFull(circuitDag, replace, findDag, false, rand);
+            // circuitDag = applier.applyRuleParallelNewTimingFull(circuitDag, replace, findDag, false, rand);
+            circuitDag = applier.applyRuleParallelNew(circuitDag, replace, findDag, false, rand);
             long endTime = System.nanoTime();
             
             long duration = endTime - startTime;

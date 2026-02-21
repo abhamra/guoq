@@ -417,7 +417,8 @@ public class Optimizer {
         int endDepth = patternToCirc.values().stream().mapToInt(Node::getDepth).max().orElse(startNode.getDepth()) + 1;
 
         // NOTE: Introducing deep copies for patternToCirc, angleMap
-        return new Match(startNode, new HashMap<>(patternToCirc), startDepth, endDepth, new HashMap<>(angleMap), matched, replaced);
+        // UPDATE: Also introducing deep copies for matched, replaced
+        return new Match(startNode, new HashMap<>(patternToCirc), startDepth, endDepth, new HashMap<>(angleMap), new HashSet<>(matched), new HashSet<>(replaced));
     }
 
     // Actually changes the CircuitDAG by applying the match from `matchAtNode`, does this in-place
@@ -517,6 +518,39 @@ public class Optimizer {
 
 
     public ArrayList<Match> findMatchesParallel(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, Pair<Integer, Integer>[] claimedIntervals, ReentrantReadWriteLock rwl, boolean applyOnce, Random rand) {
+        ArrayList<Match> foundMatches = new ArrayList<>();
+        Map<Node, Node> patternToCirc = new HashMap<>();
+        int patternDepth = pattern.getDepth();
+        Map<Edge, Edge> patternToCircEdges = new HashMap<>();
+        Map<String, Expr> angleMap = new HashMap<>();
+        Set<Node> matched = new HashSet<>();
+        Set<Node> replaced = new HashSet<>();
+        List<Map<Node, Node>> matches = new ArrayList<>();
+
+        CircuitDAG copy = null;
+        List<Node> nodesInWindow = circuit.nodes().stream()
+            .filter(n -> n.getDepth() >= startDepth && n.getDepth() <= endDepth)
+            .collect(Collectors.toCollection(ArrayList::new));
+        Collections.shuffle(nodesInWindow, rand);
+
+        for (Node circN : nodesInWindow) {
+            Match match = matchAtNode(circuit, pattern, circN, patternToCirc, patternToCircEdges, angleMap, matched, replaced, matches);
+            // System.out.println("found a match find matches parallel!");
+
+            if (match != null) {
+
+                if (match.startDepth < startDepth ||
+                    match.startDepth >= (windowIdx+1)*patternDepth) {
+                    continue;
+                } // else
+
+                foundMatches.add(match);
+            }
+        }
+        return foundMatches;
+    }
+
+    public ArrayList<Match> findMatchesParallelUpdated(CircuitDAG circuit, CircuitDAG pattern, String replace, int startDepth, int endDepth, int windowIdx, boolean applyOnce, Random rand) {
         ArrayList<Match> foundMatches = new ArrayList<>();
         Map<Node, Node> patternToCirc = new HashMap<>();
         int patternDepth = pattern.getDepth();
@@ -760,6 +794,8 @@ public class Optimizer {
         // FIXME: Remove this after testing done
         // System.out.println("IN APPLY RULE PARALLEL NEW");
         // Call this just in case we forgot, for each rule
+
+        // TODO: Figure out of we can hoist this!
         circuit.assignDepthToNodes();
         pattern.assignDepthToNodes();
         int patternDepth = pattern.getDepth();
@@ -774,8 +810,11 @@ public class Optimizer {
         // For future, if/when we allow the ability to apply multiple times in a window, we can use
         // claimedIntervals and only store the earliest match for a given window, because that is what will
         // cause a conflict with the patternDepth overlap
-        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
-        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock(); // for claimedIntervals
+
+        // FIXME: We no longer use claimedIntervals or RWL to do any checking!
+        // Thus they are commented out here
+        // Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
+        // ReentrantReadWriteLock rwl = new ReentrantReadWriteLock(); // for claimedIntervals
         ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
         List<Future<ArrayList<Match>>> futures = new ArrayList<>();
         // Collect results: each thread returns its transformed sub-DAG or null
@@ -784,7 +823,8 @@ public class Optimizer {
             int startDepth = i * patternDepth;
             int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
             futures.add(threadPool.submit(() ->
-                findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
+                // findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
+                findMatchesParallelUpdated(circuit, pattern, replace, startDepth, endDepth, windowIndex, applyOnce, rand)
             ));
         }
 
@@ -800,458 +840,316 @@ public class Optimizer {
 
         threadPool.shutdown();
 
-        // Step 2. sort
-        allMatches.sort(Comparator.comparingInt(Match::getEndDepth));
-        
-        // Step 3. Select non-overlapping matches
-        List<Match> selected = new ArrayList<>();
-        int lastEnd = -1;
-        for (Match m : allMatches) {
-            if (m.getStartDepth() > lastEnd) {
-                selected.add(m);
-                lastEnd = m.getEndDepth();
-            }
+        // Step 2. Select non-overlapping matches using node-level conflict detection.
+    // More precise than depth-interval overlap: two matches only conflict if they
+    // actually share circuit nodes, not merely overlap in depth range.
+    List<Match> selected = new ArrayList<>();
+    Set<Node> globalReplaced = new HashSet<>();
+    for (Match m : allMatches) {
+        if (!m.conflictsWith(globalReplaced)) {
+            selected.add(m);
+            globalReplaced.addAll(m.getCircuitNodes());
         }
-
-
-        // CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
-
-        // System.out.println("Printing all matches!");
-        // for (Match m : selected) {
-        //     System.out.println(m);
-        // }
-
-        // Step 4. Apply :D
-        // NOTE: Perhaps we can have the `replace` set be stateful so we don't overwrite?
-        // But this should never be possible, so do we just ignore for now?
-
-        // FIXME: Is this correct, or do we need to get the
-        // state from the matching phase and transfer it over here?
-        Set<Node> replaced = new HashSet<>();
-        Map<String, Expr> angleMap = new HashMap<>();
-        for (Match m : selected) {
-            CircuitDAG updated = applyMatch(
-                circuit,   // original circuit DAG (for context)
-                circuit,      // current working copy // NOTE: Changed to circuit from copy
-                pattern,
-                replace,
-                m,
-                applyOnce
-            );
-            // if (updated != null) {
-            //     circuit = updated; // NOTE: Changed to circuit from copy
-            //     if (applyOnce) break; // optional early exit
-            // }
-            if (updated != null && applyOnce) break;
-        }
-
-        return circuit; // updated in-place via findParallel // NOTE: Changed to circuit from copy
     }
 
-    public CircuitDAG applyRuleParallelNewTiming(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
-        System.out.println("IN APPLY RULE PARALLEL NEW");
-        
-        // Call this just in case we forgot, for each rule
-        circuit.assignDepthToNodes();
-        pattern.assignDepthToNodes();
-        int patternDepth = pattern.getDepth();
-        int circuitDepth = circuit.getDepth();
-        int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
-        int cores = Runtime.getRuntime().availableProcessors();
-        
-        // Measure thread pool creation
-        long poolCreateStart = System.nanoTime();
-        ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
-        long poolCreateEnd = System.nanoTime();
-        System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
-        
-        // attempt to multithread :D
-        // NOTE: claimedIntervals is allowed to use this structure because we ASSUME applyOnce = true
-        // For future, if/when we allow the ability to apply multiple times in a window, we can use
-        // claimedIntervals and only store the earliest match for a given window, because that is what will
-        // cause a conflict with the patternDepth overlap
-        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
-        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock(); // for claimedIntervals
-        List<Future<ArrayList<Match>>> futures = new ArrayList<>();
-        
-        // Measure task submission
-        long submitStart = System.nanoTime();
-        // Collect results: each thread returns its transformed sub-DAG or null
-        for (int i = 0; i < numWindows; i++) {
-            final int windowIndex = i;
-            int startDepth = i * patternDepth;
-            int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth); // lookahead
-            futures.add(threadPool.submit(() ->
-                findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
-            ));
-        }
-        long submitEnd = System.nanoTime();
-        System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
-        
-        // Step 1. collect all matches from all threads (actual work happens here)
-        long workStart = System.nanoTime();
-        List<Match> allMatches = new ArrayList<>();
-        for (Future<ArrayList<Match>> f : futures) {
-            try {
-                allMatches.addAll(f.get());
-            } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
-            }
-        }
-        long workEnd = System.nanoTime();
-        System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
-        
-        // Measure shutdown
-        long shutdownStart = System.nanoTime();
-        threadPool.shutdown();
-        long shutdownEnd = System.nanoTime();
-        System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
-        
-        // Calculate and print total overhead
-        long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
-        long totalTime = (workEnd - workStart) + overheadTotal;
-        System.out.printf("Total thread pool overhead: %.3f ms (%.1f%% of total time)%n", 
-                         overheadTotal / 1_000_000.0, 
-                         100.0 * overheadTotal / totalTime);
-        
-        // Step 2. sort
-        long sortStart = System.nanoTime();
-        allMatches.sort(Comparator.comparingInt(Match::getEndDepth));
-        long sortEnd = System.nanoTime();
-        System.out.printf("Step 2 - Sort matches: %.3f ms%n", (sortEnd - sortStart) / 1_000_000.0);
-        
-        // Step 3. Select non-overlapping matches
-        long selectStart = System.nanoTime();
-        List<Match> selected = new ArrayList<>();
-        int lastEnd = -1;
-        for (Match m : allMatches) {
-            if (m.getStartDepth() > lastEnd) {
-                selected.add(m);
-                lastEnd = m.getEndDepth();
-            }
-        }
-        long selectEnd = System.nanoTime();
-        System.out.printf("Step 3 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
-                         (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
-        
-        // CircuitDAG copy = new CircuitDAG(circuit); // start from a copy of the circuit
-        // System.out.println("Printing all matches!");
-        // for (Match m : selected) {
-        //     System.out.println(m);
-        // }
-        
-        // Step 4. Apply :D
-        long applyStart = System.nanoTime();
-        // NOTE: Perhaps we can have the `replace` set be stateful so we don't overwrite?
-        // But this should never be possible, so do we just ignore for now?
-        // FIXME: Is this correct, or do we need to get the
-        // state from the matching phase and transfer it over here?
-        Set<Node> replaced = new HashSet<>();
-        Map<String, Expr> angleMap = new HashMap<>();
-        for (Match m : selected) {
-            CircuitDAG updated = applyMatch(
-                circuit,   // original circuit DAG (for context)
-                circuit,      // current working copy // NOTE: Changed to circuit from copy
-                pattern,
-                replace,
-                m,
-                applyOnce
-            );
-            // if (updated != null) {
-            //     circuit = updated; // NOTE: Changed to circuit from copy
-            //     if (applyOnce) break; // optional early exit
-            // }
-            if (updated != null && applyOnce) break;
-        }
-        long applyEnd = System.nanoTime();
-        System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
-        
-        // Print total time summary
-        long grandTotal = (applyEnd - poolCreateStart);
-        System.out.printf("TOTAL TIME: %.3f ms%n", grandTotal / 1_000_000.0);
-        
-        return circuit; // updated in-place via findParallel
+    // Step 3. Apply
+    for (Match m : selected) {
+        CircuitDAG updated = applyMatch(
+            circuit,
+            circuit,
+            pattern,
+            replace,
+            m,
+            applyOnce
+        );
+        if (updated != null && applyOnce) break;
     }
 
-    public CircuitDAG applyRuleParallelNewTimingFull(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
-        long methodStart = System.nanoTime(); // START TIMING EVERYTHING
-        System.out.println("IN APPLY RULE PARALLEL NEW");
-        
-        // Measure depth assignment
-        long depthStart = System.nanoTime();
-        circuit.assignDepthToNodes();
-        pattern.assignDepthToNodes();
-        int patternDepth = pattern.getDepth();
-        int circuitDepth = circuit.getDepth();
-        int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
-        int cores = Runtime.getRuntime().availableProcessors();
-        long depthEnd = System.nanoTime();
-        System.out.printf("Depth assignment & setup: %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
+    return circuit;
+}
 
-        // Print threading info
-        System.out.println("\n=== THREADING INFO ===");
-        System.out.printf("Available processors: %d%n", cores);
-        System.out.printf("Number of windows: %d%n", numWindows);
-        System.out.printf("Thread pool size: %d%n", Math.min(cores, numWindows));
-        System.out.printf("Pattern depth: %d, Circuit depth: %d%n", patternDepth, circuitDepth);
-        
-        // Measure thread pool creation
-        long poolCreateStart = System.nanoTime();
-        ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
-        long poolCreateEnd = System.nanoTime();
-        System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
-        
-        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
-        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
-        List<Future<ArrayList<Match>>> futures = new ArrayList<>();
-        
-        // Measure task submission
-        long submitStart = System.nanoTime();
-        for (int i = 0; i < numWindows; i++) {
-            final int windowIndex = i;
-            int startDepth = i * patternDepth;
-            int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth);
-            futures.add(threadPool.submit(() ->
-                findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
-            ));
-        }
-        long submitEnd = System.nanoTime();
-        System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
-        
-        // Step 1. collect all matches from all threads
-        long workStart = System.nanoTime();
-        List<Match> allMatches = new ArrayList<>();
-        for (Future<ArrayList<Match>> f : futures) {
-            try {
-                allMatches.addAll(f.get());
-            } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
-            }
-        }
-        long workEnd = System.nanoTime();
-        System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
-        
-        // Measure shutdown
-        long shutdownStart = System.nanoTime();
-        threadPool.shutdown();
-        long shutdownEnd = System.nanoTime();
-        System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
-        
-        // Calculate thread pool overhead
-        long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
-        System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
-        
-        // Step 2. sort
-        long sortStart = System.nanoTime();
-        allMatches.sort(Comparator.comparingInt(Match::getEndDepth));
-        long sortEnd = System.nanoTime();
-        System.out.printf("Step 2 - Sort matches: %.3f ms%n", (sortEnd - sortStart) / 1_000_000.0);
-        
-        // Step 3. Select non-overlapping matches
-        long selectStart = System.nanoTime();
-        List<Match> selected = new ArrayList<>();
-        int lastEnd = -1;
-        for (Match m : allMatches) {
-            if (m.getStartDepth() > lastEnd) {
-                selected.add(m);
-                lastEnd = m.getEndDepth();
-            }
-        }
-        long selectEnd = System.nanoTime();
-        System.out.printf("Step 3 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
-                         (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
-        
-        // Measure circuit copy (THIS IS LIKELY EXPENSIVE!)
-        long copyStart = System.nanoTime();
-        // CircuitDAG copy = new CircuitDAG(circuit);
-        long copyEnd = System.nanoTime();
-        System.out.printf("Circuit copy creation: %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
-        
-        // Step 4. Apply
-        long applyStart = System.nanoTime();
-        Set<Node> replaced = new HashSet<>();
-        Map<String, Expr> angleMap = new HashMap<>();
-        for (Match m : selected) {
-            CircuitDAG updated = applyMatch(
-                circuit,   // original circuit DAG (for context)
-                circuit,      // current working copy // NOTE: Changed to circuit from copy
-                pattern,
-                replace,
-                m,
-                applyOnce
-            );
-            // if (updated != null) {
-            //     circuit = updated; // NOTE: Changed to circuit from copy
-            //     if (applyOnce) break; // optional early exit
-            // }
-            if (updated != null && applyOnce) break;
-        }
-        long applyEnd = System.nanoTime();
-        System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
-        
-        // Total method time
-        long methodEnd = System.nanoTime();
-        long methodTotal = methodEnd - methodStart;
-        
-        // Print comprehensive summary
-        System.out.println("\n=== TIMING BREAKDOWN ===");
-        System.out.printf("Depth assignment:     %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
-        System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
-        System.out.printf("Parallel work:        %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
-        System.out.printf("Sort matches:         %.3f ms%n", (sortEnd - sortStart) / 1_000_000.0);
-        System.out.printf("Select matches:       %.3f ms%n", (selectEnd - selectStart) / 1_000_000.0);
-        System.out.printf("Circuit copy:         %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
-        System.out.printf("Apply matches:        %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
-        
-        long accountedTime = (depthEnd - depthStart) + overheadTotal + (workEnd - workStart) + 
-                             (sortEnd - sortStart) + (selectEnd - selectStart) + 
-                             (copyEnd - copyStart) + (applyEnd - applyStart);
-        long unaccountedTime = methodTotal - accountedTime;
-        
-        System.out.printf("-----------------------------%n");
-        System.out.printf("Accounted time:       %.3f ms%n", accountedTime / 1_000_000.0);
-        System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
-        System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
-        
-        return circuit;
+public CircuitDAG applyRuleParallelNewTiming(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+    circuit.assignDepthToNodes();
+    pattern.assignDepthToNodes();
+    int patternDepth = pattern.getDepth();
+    int circuitDepth = circuit.getDepth();
+    int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+    int cores = Runtime.getRuntime().availableProcessors();
+    
+    long poolCreateStart = System.nanoTime();
+    ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
+    long poolCreateEnd = System.nanoTime();
+    System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
+    
+    List<Future<ArrayList<Match>>> futures = new ArrayList<>();
+    
+    long submitStart = System.nanoTime();
+    for (int i = 0; i < numWindows; i++) {
+        final int windowIndex = i;
+        int startDepth = i * patternDepth;
+        int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth);
+        futures.add(threadPool.submit(() ->
+            findMatchesParallelUpdated(circuit, pattern, replace, startDepth, endDepth, windowIndex, applyOnce, rand)
+        ));
     }
-
-
-    public CircuitDAG applyRuleParallelNewTimingThread(int threadPoolSize, CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
-        long methodStart = System.nanoTime(); // START TIMING EVERYTHING
-        System.out.println("IN APPLY RULE PARALLEL NEW");
-        
-        // Measure depth assignment
-        long depthStart = System.nanoTime();
-        circuit.assignDepthToNodes();
-        pattern.assignDepthToNodes();
-        int patternDepth = pattern.getDepth();
-        int circuitDepth = circuit.getDepth();
-        int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
-        int cores = Runtime.getRuntime().availableProcessors();
-        long depthEnd = System.nanoTime();
-        System.out.printf("Depth assignment & setup: %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
-
-        // Measure thread pool creation
-        long poolCreateStart = System.nanoTime();
-        ExecutorService threadPool = Executors.newFixedThreadPool(threadPoolSize);
-        long poolCreateEnd = System.nanoTime();
-        System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
-        
-        Pair<Integer, Integer>[] claimedIntervals = new Pair[numWindows];
-        ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
-        List<Future<ArrayList<Match>>> futures = new ArrayList<>();
-        
-        // Measure task submission
-        long submitStart = System.nanoTime();
-        for (int i = 0; i < numWindows; i++) {
-            final int windowIndex = i;
-            int startDepth = i * patternDepth;
-            int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth);
-            futures.add(threadPool.submit(() ->
-                findMatchesParallel(circuit, pattern, replace, startDepth, endDepth, windowIndex, claimedIntervals, rwl, applyOnce, rand)
-            ));
+    long submitEnd = System.nanoTime();
+    System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
+    
+    // Step 1. collect all matches from all threads
+    long workStart = System.nanoTime();
+    List<Match> allMatches = new ArrayList<>();
+    for (Future<ArrayList<Match>> f : futures) {
+        try {
+            allMatches.addAll(f.get());
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
         }
-        long submitEnd = System.nanoTime();
-        System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
-        
-        // Step 1. collect all matches from all threads
-        long workStart = System.nanoTime();
-        List<Match> allMatches = new ArrayList<>();
-        for (Future<ArrayList<Match>> f : futures) {
-            try {
-                allMatches.addAll(f.get());
-            } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
-            }
-        }
-        long workEnd = System.nanoTime();
-        System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
-        
-        // Measure shutdown
-        long shutdownStart = System.nanoTime();
-        threadPool.shutdown();
-        long shutdownEnd = System.nanoTime();
-        System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
-        
-        // Calculate thread pool overhead
-        long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
-        System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
-        
-        // Step 2. sort
-        long sortStart = System.nanoTime();
-        allMatches.sort(Comparator.comparingInt(Match::getEndDepth));
-        long sortEnd = System.nanoTime();
-        System.out.printf("Step 2 - Sort matches: %.3f ms%n", (sortEnd - sortStart) / 1_000_000.0);
-        
-        // Step 3. Select non-overlapping matches
-        long selectStart = System.nanoTime();
-        List<Match> selected = new ArrayList<>();
-        int lastEnd = -1;
-        for (Match m : allMatches) {
-            if (m.getStartDepth() > lastEnd) {
-                selected.add(m);
-                lastEnd = m.getEndDepth();
-            }
-        }
-        long selectEnd = System.nanoTime();
-        System.out.printf("Step 3 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
-                         (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
-        
-        // Measure circuit copy (THIS IS LIKELY EXPENSIVE!)
-        long copyStart = System.nanoTime();
-        // CircuitDAG copy = new CircuitDAG(circuit);
-        long copyEnd = System.nanoTime();
-        System.out.printf("Circuit copy creation: %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
-        
-        // Step 4. Apply
-        long applyStart = System.nanoTime();
-        Set<Node> replaced = new HashSet<>();
-        Map<String, Expr> angleMap = new HashMap<>();
-        for (Match m : selected) {
-            CircuitDAG updated = applyMatch(
-                circuit,   // original circuit DAG (for context)
-                circuit,      // current working copy // NOTE: Changed to circuit from copy
-                pattern,
-                replace,
-                m,
-                applyOnce
-            );
-            // if (updated != null) {
-            //     circuit = updated; // NOTE: Changed to circuit from copy
-            //     if (applyOnce) break; // optional early exit
-            // }
-            if (updated != null && applyOnce) break;
-        }
-        long applyEnd = System.nanoTime();
-        System.out.printf("Step 4 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
-        
-        // Total method time
-        long methodEnd = System.nanoTime();
-        long methodTotal = methodEnd - methodStart;
-        
-        // Print comprehensive summary
-        System.out.println("\n=== TIMING BREAKDOWN ===");
-        System.out.printf("Depth assignment:     %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
-        System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
-        System.out.printf("Parallel work:        %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
-        System.out.printf("Sort matches:         %.3f ms%n", (sortEnd - sortStart) / 1_000_000.0);
-        System.out.printf("Select matches:       %.3f ms%n", (selectEnd - selectStart) / 1_000_000.0);
-        System.out.printf("Circuit copy:         %.3f ms%n", (copyEnd - copyStart) / 1_000_000.0);
-        System.out.printf("Apply matches:        %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
-        
-        long accountedTime = (depthEnd - depthStart) + overheadTotal + (workEnd - workStart) + 
-                             (sortEnd - sortStart) + (selectEnd - selectStart) + 
-                             (copyEnd - copyStart) + (applyEnd - applyStart);
-        long unaccountedTime = methodTotal - accountedTime;
-        
-        System.out.printf("-----------------------------%n");
-        System.out.printf("Accounted time:       %.3f ms%n", accountedTime / 1_000_000.0);
-        System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
-        System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
-        
-        return circuit;
     }
+    long workEnd = System.nanoTime();
+    System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
+    
+    long shutdownStart = System.nanoTime();
+    threadPool.shutdown();
+    long shutdownEnd = System.nanoTime();
+    System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
+    
+    long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
+    long totalTime = (workEnd - workStart) + overheadTotal;
+    System.out.printf("Total thread pool overhead: %.3f ms (%.1f%% of total time)%n", 
+                     overheadTotal / 1_000_000.0, 
+                     100.0 * overheadTotal / totalTime);
+    
+    // Step 2. Select non-overlapping matches (node-level conflict detection, no sort needed)
+    long selectStart = System.nanoTime();
+    List<Match> selected = new ArrayList<>();
+    Set<Node> globalReplaced = new HashSet<>();
+    for (Match m : allMatches) {
+        if (!m.conflictsWith(globalReplaced)) {
+            selected.add(m);
+            globalReplaced.addAll(m.getCircuitNodes());
+        }
+    }
+    long selectEnd = System.nanoTime();
+    System.out.printf("Step 2 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
+                     (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
+    
+    // Step 3. Apply
+    long applyStart = System.nanoTime();
+    for (Match m : selected) {
+        CircuitDAG updated = applyMatch(circuit, circuit, pattern, replace, m, applyOnce);
+        if (updated != null && applyOnce) break;
+    }
+    long applyEnd = System.nanoTime();
+    System.out.printf("Step 3 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
+    
+    long grandTotal = (applyEnd - poolCreateStart);
+    System.out.printf("TOTAL TIME: %.3f ms%n", grandTotal / 1_000_000.0);
+    
+    return circuit;
+}
+
+public CircuitDAG applyRuleParallelNewTimingFull(CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+    long methodStart = System.nanoTime();
+    
+    long depthStart = System.nanoTime();
+    circuit.assignDepthToNodes();
+    pattern.assignDepthToNodes();
+    int patternDepth = pattern.getDepth();
+    int circuitDepth = circuit.getDepth();
+    int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+    int cores = Runtime.getRuntime().availableProcessors();
+    long depthEnd = System.nanoTime();
+    System.out.printf("Depth assignment & setup: %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
+
+    System.out.println("\n=== THREADING INFO ===");
+    System.out.printf("Available processors: %d%n", cores);
+    System.out.printf("Number of windows: %d%n", numWindows);
+    System.out.printf("Thread pool size: %d%n", Math.min(cores, numWindows));
+    System.out.printf("Pattern depth: %d, Circuit depth: %d%n", patternDepth, circuitDepth);
+    
+    long poolCreateStart = System.nanoTime();
+    ExecutorService threadPool = Executors.newFixedThreadPool(Math.min(cores, numWindows));
+    long poolCreateEnd = System.nanoTime();
+    System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
+    
+    List<Future<ArrayList<Match>>> futures = new ArrayList<>();
+    
+    long submitStart = System.nanoTime();
+    for (int i = 0; i < numWindows; i++) {
+        final int windowIndex = i;
+        int startDepth = i * patternDepth;
+        int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth);
+        futures.add(threadPool.submit(() ->
+            findMatchesParallelUpdated(circuit, pattern, replace, startDepth, endDepth, windowIndex, applyOnce, rand)
+        ));
+    }
+    long submitEnd = System.nanoTime();
+    System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
+    
+    // Step 1. Collect all matches from all threads
+    long workStart = System.nanoTime();
+    List<Match> allMatches = new ArrayList<>();
+    for (Future<ArrayList<Match>> f : futures) {
+        try {
+            allMatches.addAll(f.get());
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+    long workEnd = System.nanoTime();
+    System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
+    
+    long shutdownStart = System.nanoTime();
+    threadPool.shutdown();
+    long shutdownEnd = System.nanoTime();
+    System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
+    
+    long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
+    System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
+    
+    // Step 2. Select non-overlapping matches (node-level conflict detection, no sort needed)
+    long selectStart = System.nanoTime();
+    List<Match> selected = new ArrayList<>();
+    Set<Node> globalReplaced = new HashSet<>();
+    for (Match m : allMatches) {
+        if (!m.conflictsWith(globalReplaced)) {
+            selected.add(m);
+            globalReplaced.addAll(m.getCircuitNodes());
+        }
+    }
+    long selectEnd = System.nanoTime();
+    System.out.printf("Step 2 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
+                     (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
+    
+    // Step 3. Apply
+    long applyStart = System.nanoTime();
+    for (Match m : selected) {
+        CircuitDAG updated = applyMatch(circuit, circuit, pattern, replace, m, applyOnce);
+        if (updated != null && applyOnce) break;
+    }
+    long applyEnd = System.nanoTime();
+    System.out.printf("Step 3 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
+    
+    long methodEnd = System.nanoTime();
+    long methodTotal = methodEnd - methodStart;
+    
+    System.out.println("\n=== TIMING BREAKDOWN ===");
+    System.out.printf("Depth assignment:     %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
+    System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
+    System.out.printf("Parallel work:        %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
+    System.out.printf("Select matches:       %.3f ms%n", (selectEnd - selectStart) / 1_000_000.0);
+    System.out.printf("Apply matches:        %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
+    
+    long accountedTime = (depthEnd - depthStart) + overheadTotal + (workEnd - workStart) +
+                         (selectEnd - selectStart) + (applyEnd - applyStart);
+    long unaccountedTime = methodTotal - accountedTime;
+    
+    System.out.printf("-----------------------------%n");
+    System.out.printf("Accounted time:       %.3f ms%n", accountedTime / 1_000_000.0);
+    System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
+    System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
+    
+    return circuit;
+}
+
+public CircuitDAG applyRuleParallelNewTimingThread(int threadPoolSize, CircuitDAG circuit, String replace, CircuitDAG pattern, boolean applyOnce, Random rand) {
+    long methodStart = System.nanoTime();
+    
+    long depthStart = System.nanoTime();
+    circuit.assignDepthToNodes();
+    pattern.assignDepthToNodes();
+    int patternDepth = pattern.getDepth();
+    int circuitDepth = circuit.getDepth();
+    int numWindows = (int) Math.ceil((double) circuitDepth/patternDepth);
+    int cores = Runtime.getRuntime().availableProcessors();
+    long depthEnd = System.nanoTime();
+    System.out.printf("Depth assignment & setup: %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
+
+    long poolCreateStart = System.nanoTime();
+    ExecutorService threadPool = Executors.newFixedThreadPool(threadPoolSize);
+    long poolCreateEnd = System.nanoTime();
+    System.out.printf("Thread pool creation: %.3f ms%n", (poolCreateEnd - poolCreateStart) / 1_000_000.0);
+    
+    List<Future<ArrayList<Match>>> futures = new ArrayList<>();
+    
+    long submitStart = System.nanoTime();
+    for (int i = 0; i < numWindows; i++) {
+        final int windowIndex = i;
+        int startDepth = i * patternDepth;
+        int endDepth = Math.min(circuitDepth, (i + 1) * patternDepth + patternDepth);
+        futures.add(threadPool.submit(() ->
+            findMatchesParallelUpdated(circuit, pattern, replace, startDepth, endDepth, windowIndex, applyOnce, rand)
+        ));
+    }
+    long submitEnd = System.nanoTime();
+    System.out.printf("Task submission: %.3f ms%n", (submitEnd - submitStart) / 1_000_000.0);
+    
+    // Step 1. Collect all matches from all threads
+    long workStart = System.nanoTime();
+    List<Match> allMatches = new ArrayList<>();
+    for (Future<ArrayList<Match>> f : futures) {
+        try {
+            allMatches.addAll(f.get());
+        } catch (InterruptedException | ExecutionException e) {
+            e.printStackTrace();
+        }
+    }
+    long workEnd = System.nanoTime();
+    System.out.printf("Step 1 - Collect matches: %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
+    
+    long shutdownStart = System.nanoTime();
+    threadPool.shutdown();
+    long shutdownEnd = System.nanoTime();
+    System.out.printf("Thread pool shutdown: %.3f ms%n", (shutdownEnd - shutdownStart) / 1_000_000.0);
+    
+    long overheadTotal = (poolCreateEnd - poolCreateStart) + (submitEnd - submitStart) + (shutdownEnd - shutdownStart);
+    System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
+    
+    // Step 2. Select non-overlapping matches (node-level conflict detection, no sort needed)
+    long selectStart = System.nanoTime();
+    List<Match> selected = new ArrayList<>();
+    Set<Node> globalReplaced = new HashSet<>();
+    for (Match m : allMatches) {
+        if (!m.conflictsWith(globalReplaced)) {
+            selected.add(m);
+            globalReplaced.addAll(m.getCircuitNodes());
+        }
+    }
+    long selectEnd = System.nanoTime();
+    System.out.printf("Step 2 - Select non-overlapping: %.3f ms (%d selected from %d total)%n", 
+                     (selectEnd - selectStart) / 1_000_000.0, selected.size(), allMatches.size());
+    
+    // Step 3. Apply
+    long applyStart = System.nanoTime();
+    for (Match m : selected) {
+        CircuitDAG updated = applyMatch(circuit, circuit, pattern, replace, m, applyOnce);
+        if (updated != null && applyOnce) break;
+    }
+    long applyEnd = System.nanoTime();
+    System.out.printf("Step 3 - Apply matches: %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
+    
+    long methodEnd = System.nanoTime();
+    long methodTotal = methodEnd - methodStart;
+    
+    System.out.println("\n=== TIMING BREAKDOWN ===");
+    System.out.printf("Depth assignment:     %.3f ms%n", (depthEnd - depthStart) / 1_000_000.0);
+    System.out.printf("Thread pool overhead: %.3f ms%n", overheadTotal / 1_000_000.0);
+    System.out.printf("Parallel work:        %.3f ms%n", (workEnd - workStart) / 1_000_000.0);
+    System.out.printf("Select matches:       %.3f ms%n", (selectEnd - selectStart) / 1_000_000.0);
+    System.out.printf("Apply matches:        %.3f ms%n", (applyEnd - applyStart) / 1_000_000.0);
+    
+    long accountedTime = (depthEnd - depthStart) + overheadTotal + (workEnd - workStart) +
+                         (selectEnd - selectStart) + (applyEnd - applyStart);
+    long unaccountedTime = methodTotal - accountedTime;
+    
+    System.out.printf("-----------------------------%n");
+    System.out.printf("Accounted time:       %.3f ms%n", accountedTime / 1_000_000.0);
+    System.out.printf("Unaccounted time:     %.3f ms%n", unaccountedTime / 1_000_000.0);
+    System.out.printf("TOTAL METHOD TIME:    %.3f ms%n", methodTotal / 1_000_000.0);
+    
+    return circuit;
+}
+
 
     // Returns the updated CircuitDAG given some input pattern to apply, does rule matching and application in parallel
     // We use a form of depth parallelism by dividing the circuit into subcircuits, and finding matches in each subcircuits
@@ -2941,8 +2839,8 @@ public class Optimizer {
                         Pair<CircuitDAG, String> rule = rules.get(ruleToUse);
                         String[] splitRule = rule.getSecond().split(" \\| ");
                         var rulesApplied = new ArrayList<>(c.getRulesApplied());
-                        // TODO: Make the apply rule parallel!
-                        // FIXME: We currently default to applyOnce = true, for simplicity
+
+                        // TODO: can we calculate circ depth, pat depth here?
                         CircuitDAG cPrime = applyRuleParallelNew(c.getCircuit(), splitRule[0], rule.getFirst(), Params.APPLY_ONCE, rand);
                         candidate = new OptCircuit(cPrime, rulesApplied, System.currentTimeMillis(), (System.currentTimeMillis() - timeStart) / 1000);
                         if (cPrime != c.getCircuit()) {

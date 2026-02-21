@@ -118,5 +118,35 @@ public class Match {
         return sb.toString();
     }
 
+    /**
+     * Returns the set of circuit nodes involved in this match.
+     * Used for conflict detection: two matches conflict iff their circuit node sets intersect.
+     */
+    public Set<Node> getCircuitNodes() {
+        return new HashSet<>(patternToCircMap.values());
+    }
+
+    /**
+     * Checks whether this match conflicts with another match,
+     * i.e., they share at least one circuit node.
+     */
+    public boolean conflictsWith(Match other) {
+        for (Node n : this.getCircuitNodes()) {
+            if (other.getCircuitNodes().contains(n)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Checks whether this match conflicts with a set of already-claimed circuit nodes.
+     * More efficient than conflictsWith(Match) when building a globalReplaced set incrementally.
+     */
+    public boolean conflictsWith(Set<Node> claimed) {
+        for (Node n : getCircuitNodes()) {
+            if (claimed.contains(n)) return true;
+        }
+        return false;
+    }
+
 }
 
